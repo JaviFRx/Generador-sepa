@@ -9,6 +9,8 @@ from typing import Dict
 from datetime import datetime
 import re
 import os
+from pypdf import PdfReader, PdfWriter
+from pypdf.generic import NameObject, DictionaryObject, ArrayObject, TextStringObject, NumberObject
 
 
 class GeneradorConsentimientos:
@@ -123,6 +125,9 @@ class GeneradorConsentimientos:
             # Eliminar archivo Word temporal solo si la conversión fue exitosa
             if ruta_pdf.exists():
                 os.remove(ruta_word)
+                
+                # Añadir campos editables al PDF
+                self._anadir_campos_editables(ruta_pdf)
             
             return str(ruta_pdf)
             
@@ -233,5 +238,104 @@ class GeneradorConsentimientos:
         # Reemplazar espacios por guiones bajos
         texto = texto.replace(' ', '_')
         # Limitar longitud
-        texto = texto[:50]
-        return texto
+        texto = texto[:50]    
+    def _anadir_campos_editables(self, ruta_pdf: Path):
+        """
+        Añade campos de formulario editables al PDF
+        
+        Args:
+            ruta_pdf: Ruta del archivo PDF al que añadir los campos
+        """
+        try:
+            # Leer el PDF existente
+            reader = PdfReader(str(ruta_pdf))
+            writer = PdfWriter()
+            
+            # Copiar todas las páginas
+            for page in reader.pages:
+                writer.add_page(page)
+            
+            # Obtener la última página (donde están fecha, localidad y firma)
+            ultima_pagina = len(reader.pages) - 1
+            page_height = float(reader.pages[ultima_pagina].mediabox.height)
+            page_width = float(reader.pages[ultima_pagina].mediabox.width)
+            
+            # Posiciones aproximadas para los campos (ajustar según tu plantilla)
+            # Estos valores son aproximados y pueden necesitar ajuste
+            campos = [
+                {
+                    'nombre': 'fecha',
+                    'x': 150,
+                    'y': page_height - 680,  # Ajustar según posición en tu plantilla
+                    'width': 120,
+                    'height': 20
+                },
+                {
+                    'nombre': 'localidad',
+                    'x': 350,
+                    'y': page_height - 680,  # Misma línea que fecha
+                    'width': 200,
+                    'height': 20
+                },
+                {
+                    'nombre': 'firma',
+                    'x': 150,
+                    'y': page_height - 720,  # Debajo de fecha/localidad
+                    'width': 400,
+                    'height': 60
+                }
+            ]
+            
+            # Añadir campos al PDF
+            writer.add_form_field(
+                self._crear_campo_texto('fecha', 150, page_height - 680, 120, 20, ultima_pagina)
+            )
+            writer.add_form_field(
+                self._crear_campo_texto('localidad', 350, page_height - 680, 200, 20, ultima_pagina)
+            )
+            writer.add_form_field(
+                self._crear_campo_texto('firma', 150, page_height - 720, 400, 60, ultima_pagina)
+            )
+            
+            # Guardar el PDF con los campos editables
+            with open(str(ruta_pdf), 'wb') as output_file:
+                writer.write(output_file)
+        
+        except Exception as e:
+            # Si falla la adición de campos, el PDF ya está generado, solo avisar
+            print(f"Advertencia: No se pudieron añadir campos editables: {str(e)}")
+    
+    def _crear_campo_texto(self, nombre, x, y, width, height, pagina):
+        """
+        Crea un campo de texto editable para el formulario PDF
+        
+        Args:
+            nombre: Nombre del campo
+            x, y: Posición en la página
+            width, height: Dimensiones del campo
+            pagina: Número de página donde colocar el campo
+            
+        Returns:
+            Objeto de campo de formulario PDF
+        """
+        from pypdf.generic import NameObject, DictionaryObject, ArrayObject, TextStringObject, NumberObject
+        
+        # Crear anotación de widget
+        widget = DictionaryObject()
+        widget.update({
+            NameObject("/Type"): NameObject("/Annot"),
+            NameObject("/Subtype"): NameObject("/Widget"),
+            NameObject("/Rect"): ArrayObject([
+                NumberObject(x),
+                NumberObject(y),
+                NumberObject(x + width),
+                NumberObject(y + height)
+            ]),
+            NameObject("/FT"): NameObject("/Tx"),  # Tipo: Text
+            NameObject("/T"): TextStringObject(nombre),  # Nombre del campo
+            NameObject("/V"): TextStringObject(""),  # Valor inicial vacío
+            NameObject("/P"): NumberObject(pagina),  # Página
+            NameObject("/F"): NumberObject(4),  # Flags: imprimible
+        })
+        
+        return widget        return texto

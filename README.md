@@ -1,53 +1,264 @@
-# Sistema de Generación de Consentimientos - SEPAS
+# Generador de Consentimientos SEPA 🏦
 
-Sistema automatizado para generar consentimientos personalizados desde plantillas Word utilizando datos de Excel y prepararlos para envío por correo electrónico.
+Sistema automatizado para generar documentos de domiciliación bancaria SEPA (Single Euro Payments Area) en formato PDF con campos editables, a partir de datos de Excel.
 
-## 📋 Características
+![Version](https://img.shields.io/badge/version-1.0.0-blue)
+![Python](https://img.shields.io/badge/python-3.10%2B-blue)
+![License](https://img.shields.io/badge/license-MIT-green)
 
-- **Lectura de Excel**: Lee datos de participantes desde archivos Excel (.xlsx, .xls)
-- **Generación automática**: Crea documentos Word personalizados desde una plantilla
-- **Preparación de emails**: Genera borradores de correos electrónicos listos para enviar
-- **Interfaz gráfica**: Aplicación de escritorio fácil de usar
-- **Registro de actividades**: Log detallado de todas las operaciones
+## ✨ Características Principales
+
+- 📊 **Lectura inteligente de Excel**: Importa datos desde archivos .xlsx o .xls
+- 🎯 **Mapeo interactivo de campos**: Sistema visual para asignar columnas del Excel a campos del formulario
+- 🤖 **Auto-detección inteligente**: Reconoce automáticamente columnas por palabras clave (español/catalán)
+- 🌍 **Auto-completado geográfico**: Busca automáticamente código postal ↔ población/provincia
+- 📝 **PDF con campos editables**: Genera PDFs con campos de fecha, localidad y firma editables
+- 📧 **Preparación de emails**: Crea borradores de correos listos para enviar
+- 🎨 **Interfaz moderna**: GUI intuitiva con diseño colorido y responsive
+- 📁 **Gestión de archivos**: Apertura directa de carpeta de salida
+
+## 🖼️ Capturas de Pantalla
+
+### Pantalla Principal
+- Interfaz con botones grandes y coloridos
+- Generación de PDFs, preparación de emails y apertura de carpeta de salida
+
+### Ventana de Mapeo Inteligente
+- Sistema guiado campo por campo
+- Auto-detección de columnas
+- Valores fijos para campos comunes
+- Auto-completado geográfico
+
+## 📋 Requisitos
+
+- **Python 3.10 o superior**
+- **Microsoft Word** (para conversión a PDF)
+- **Conexión a internet** (opcional, para auto-completado geográfico)
 
 ## 🚀 Instalación
 
-### Requisitos previos
-- Python 3.8 o superior
-- pip (gestor de paquetes de Python)
+### 1️⃣ Clonar el repositorio
 
-### Pasos de instalación
-
-1. **Clonar o descargar el proyecto**
-
-2. **Instalar dependencias**
-   ```bash
-   pip install -r requirements.txt
-   ```
-
-   O instalar manualmente:
-   ```bash
-   pip install openpyxl python-docx
-   ```
-
-## 📖 Uso
-
-### 1. Preparar archivos
-
-#### Archivo Excel
-Debe contener una hoja con:
-- **Primera fila**: Encabezados (nombre, apellido, email, dni, fecha, etc.)
-- **Siguientes filas**: Datos de cada participante
-
-Ejemplo:
-```
-| nombre | apellido | email              | dni      | fecha      |
-|--------|----------|--------------------|----------|------------|
-| Juan   | Pérez    | juan@email.com     | 12345678 | 25/01/2026 |
-| María  | García   | maria@email.com    | 87654321 | 25/01/2026 |
+```bash
+git clone https://github.com/JaviFRx/Generador-sepa.git
+cd Generador-sepa
 ```
 
-#### Plantilla Word
+### 2️⃣ Crear entorno virtual
+
+```bash
+# Windows
+python -m venv .venv
+.venv\Scripts\activate
+
+# Linux/Mac
+python3 -m venv .venv
+source .venv/bin/activate
+```
+
+### 3️⃣ Instalar dependencias
+
+```bash
+pip install -r requirements.txt
+```
+
+## 📦 Dependencias
+
+```
+openpyxl==3.1.2       # Lectura de archivos Excel
+python-docx==1.1.0    # Manipulación de documentos Word
+docx2pdf==0.1.8       # Conversión de Word a PDF
+pypdf==6.6.1          # Creación de campos editables en PDF
+```
+
+## 🎯 Uso Básico
+
+### 1. Ejecutar la aplicación
+
+```bash
+python app_consentimientos.py
+```
+
+### 2. Preparar tu plantilla Word
+
+Añade marcadores en tu plantilla con formato `{{nombre_campo}}`:
+
+```
+Referencia de la orden de domiciliación: {{referencia_orden}}
+Nombre del deudor: {{nombre_deudor}}
+Dirección: {{direccion_deudor}}
+Código postal: {{codigo_postal}}
+Población: {{poblacion}}
+Provincia: {{provincia}}
+País: {{pais_deudor}}
+IBAN: {{iban}}
+Swift BIC: {{swift_bic}}
+
+En {{localidad_firma}}, a {{fecha}}
+
+Firma del deudor: {{firma}}
+```
+
+### 3. Preparar tu Excel
+
+Tu Excel debe tener columnas como:
+- Nombre del alumno / Nom de l'alumne
+- Apellidos / Cognoms
+- Nombre del titular / Titular compte bancari
+- Dirección / Adreça
+- Código postal / Codi postal
+- Población / Població
+- IBAN
+- Swift BIC
+- etc.
+
+### 4. Proceso de generación
+
+1. **Seleccionar Excel** → Se abre ventana de mapeo automáticamente
+2. **Configurar mapeo**:
+   - Asigna cada campo al nombre de columna del Excel
+   - El sistema auto-detecta las columnas más probables
+   - Puedes usar valores fijos (ej: mismo código postal para todos)
+3. **Auto-completado geográfico**:
+   - Escribe código postal → rellena población, provincia, país
+   - O escribe población → rellena código postal y provincia
+4. **Generar PDFs**: Crea documentos con campos editables
+
+## 🔖 Campos SEPA Soportados
+
+### Datos del Alumno
+- `{{referencia_orden}}` - Auto-generado: Nombre_Apellido_Robotica
+
+### Datos del Deudor
+- `{{nombre_deudor}}` - Nombre del titular de la cuenta
+- `{{direccion_deudor}}` - Dirección completa
+- `{{codigo_postal}}` - Código postal
+- `{{poblacion}}` - Población/Ciudad
+- `{{provincia}}` - Provincia
+- `{{pais_deudor}}` - País
+
+### Datos Bancarios
+- `{{iban}}` - Número de cuenta IBAN
+- `{{swift_bic}}` - Código Swift BIC del banco
+
+### Datos del Acreedor
+- `{{identificador_acreedor}}` - Identificador del acreedor
+- `{{nombre_acreedor}}` - Nombre del acreedor
+- `{{direccion_acreedor}}` - Dirección del acreedor
+
+### Campos Auto-generados
+- `{{fecha}}` - Fecha actual (formato: DD/MM/AAAA)
+- `{{localidad_firma}}` - Copia de la población del deudor
+
+### Campos Editables en PDF
+- **Fecha** - Campo editable para firma
+- **Localidad** - Campo editable para lugar de firma
+- **Firma** - Campo editable para firma del deudor
+
+## 🧠 Auto-detección Inteligente
+
+El sistema detecta automáticamente columnas usando palabras clave:
+
+| Campo | Palabras clave detectadas |
+|-------|--------------------------|
+| Nombre alumno | nombre, nom, name, alumne, alumno |
+| Apellido | apellido, cognom, surname, cognoms |
+| IBAN | iban, cuenta, account, bancaria, compte |
+| Código postal | cp, codigo postal, codi postal, zip |
+| Población | poblacion, població, ciudad, localidad |
+| Provincia | provincia, prov, province |
+| etc. | ... |
+
+## 📁 Estructura del Proyecto
+
+```
+Generador-sepa/
+├── app_consentimientos.py              # Aplicación principal
+├── modulos/
+│   ├── __init__.py
+│   ├── lector_excel.py                 # Lectura de Excel
+│   ├── generador_word.py               # Generación Word/PDF con campos editables
+│   └── preparador_emails.py            # Preparación de emails
+├── docs/
+│   └── plantilla_domiciliacion_sepa.docx  # Plantilla SEPA
+├── ejemplos/
+│   └── datos_ejemplo.xlsx              # Excel de ejemplo
+├── requirements.txt                    # Dependencias
+├── .gitignore                         # Archivos ignorados
+└── README.md                          # Este archivo
+```
+
+## ⚙️ Configuración Avanzada
+
+### Personalizar campos editables
+
+Edita `modulos/generador_word.py`, método `_anadir_campos_editables()`:
+
+```python
+campos = [
+    {'nombre': 'fecha', 'x': 150, 'y': page_height - 680, 'width': 120, 'height': 20},
+    {'nombre': 'localidad', 'x': 350, 'y': page_height - 680, 'width': 200, 'height': 20},
+    {'nombre': 'firma', 'x': 150, 'y': page_height - 720, 'width': 400, 'height': 60}
+]
+```
+
+Ajusta valores de `x`, `y`, `width` y `height` según tu plantilla.
+
+## 🐛 Solución de Problemas
+
+### Error: "Microsoft Word no está instalado"
+- **Solución**: Instala Microsoft Word o usa una alternativa compatible con docx2pdf
+
+### Los campos no se auto-detectan
+- **Solución**: Renombra las columnas del Excel con nombres más descriptivos
+
+### El auto-completado geográfico no funciona
+- **Solución**: Verifica tu conexión a internet. Usa valores fijos si no tienes conexión
+
+### Los campos editables no aparecen en el PDF
+- **Solución**: Abre el PDF con Adobe Reader o un lector compatible con formularios PDF
+
+## 🤝 Contribuciones
+
+Las contribuciones son bienvenidas:
+
+1. Fork el proyecto
+2. Crea una rama (`git checkout -b feature/NuevaCaracteristica`)
+3. Commit tus cambios (`git commit -m 'Añadir nueva característica'`)
+4. Push a la rama (`git push origin feature/NuevaCaracteristica`)
+5. Abre un Pull Request
+
+## 📜 Licencia
+
+Este proyecto está bajo la Licencia MIT. Ver archivo `LICENSE` para más detalles.
+
+## 🙏 Agradecimientos
+
+- **APIs utilizadas**: 
+  - [Zippopotam.us](http://zippopotam.us) - Búsqueda de códigos postales
+  - [OpenStreetMap Nominatim](https://nominatim.openstreetmap.org) - Geocodificación
+- **Librerías Python**: openpyxl, python-docx, docx2pdf, pypdf
+
+## 👤 Autor
+
+**JaviFRx**
+
+- GitHub: [@JaviFRx](https://github.com/JaviFRx)
+- Proyecto: [Generador-sepa](https://github.com/JaviFRx/Generador-sepa)
+
+## 📝 Changelog
+
+### v1.0.0 (2026-01-25)
+- ✨ Mapeo inteligente de campos con auto-detección
+- 🌍 Auto-completado geográfico (código postal ↔ población)
+- 📝 PDFs con campos editables (fecha, localidad, firma)
+- 🎨 Interfaz gráfica moderna y responsive
+- 🔄 Scroll con rueda del ratón en ventana de mapeo
+- 📊 Soporte multi-idioma (español/catalán)
+
+---
+
+⭐ Si este proyecto te ha sido útil, considera darle una estrella en GitHub!
 Cree un documento Word (.docx) con marcadores usando el formato `{{campo}}`:
 - `{{nombre}}` - Se reemplazará por el nombre
 - `{{apellido}}` - Se reemplazará por el apellido
