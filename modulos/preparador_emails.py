@@ -3,8 +3,12 @@ Módulo para preparar emails con consentimientos adjuntos
 """
 
 from pathlib import Path
-from typing import List, Dict
+from typing import List, Dict, Optional
 import openpyxl
+import mimetypes
+import smtplib
+import ssl
+from email.message import EmailMessage
 
 
 class PreparadorEmails:
@@ -19,12 +23,15 @@ class PreparadorEmails:
         """
         self.carpeta_consentimientos = Path(carpeta_consentimientos)
         
-    def crear_borradores_email(self, ruta_excel: str) -> List[Dict]:
+    def crear_borradores_email(self, ruta_excel: str, asunto_base: str = "Consentimiento", 
+                               cuerpo_personalizado: str = None) -> List[Dict]:
         """
         Crea borradores de email basados en el Excel y los consentimientos generados
         
         Args:
             ruta_excel: Ruta al archivo Excel con los datos
+            asunto_base: Asunto base para los emails
+            cuerpo_personalizado: Cuerpo personalizado del email (si None, usa el por defecto)
             
         Returns:
             Lista de diccionarios con información de cada email
@@ -56,14 +63,23 @@ class PreparadorEmails:
                 # Buscar archivo de consentimiento correspondiente
                 archivo_consentimiento = self._encontrar_consentimiento(registro, archivos_generados)
                 
+                # Generar asunto
+                asunto = f"{asunto_base} - {nombre}" if nombre else asunto_base
+                
+                # Generar cuerpo
+                if cuerpo_personalizado:
+                    cuerpo = cuerpo_personalizado.replace("{nombre}", nombre)
+                else:
+                    cuerpo = self._generar_cuerpo_email(nombre)
+                
                 # Crear borrador
                 borrador = {
                     'numero': i,
                     'email': email,
                     'nombre': nombre,
                     'archivo': archivo_consentimiento,
-                    'asunto': f"Consentimiento - {nombre}",
-                    'cuerpo': self._generar_cuerpo_email(nombre)
+                    'asunto': asunto,
+                    'cuerpo': cuerpo
                 }
                 
                 borradores.append(borrador)
@@ -82,6 +98,104 @@ class PreparadorEmails:
         self._crear_csv_emails(borradores)
         
         return borradores
+
+    def enviar_emails_gmail(
+        self,
+        ruta_excel: str,
+        gmail_usuario: str,
+        gmail_app_password: str,
+        nombre_remitente: Optional[str] = None,
+        asunto_base: str = "Consentimiento",
+        cuerpo_personalizado: str = None,
+    ) -> Dict:
+        """
+        Envía emails reales usando Gmail SMTP con los consentimientos adjuntos.
+
+        Requiere contraseña de aplicación (App Password) de Gmail.
+
+        Args:
+            ruta_excel: Ruta al archivo Excel con los datos
+            gmail_usuario: Cuenta Gmail desde la que se enviarán los correos
+            gmail_app_password: Contraseña de aplicación de Gmail
+            nombre_remitente: Nombre visible del remitente (opcional)
+            asunto_base: Texto base del asunto
+            cuerpo_personalizado: Cuerpo personalizado del email (si None, usa el por defecto)
+
+        Returns:
+            Diccionario con resumen de enviados y fallidos
+        """
+        if not gmail_usuario or not gmail_app_password:
+            raise Exception("Debe indicar usuario Gmail y contraseña de aplicación")
+
+        from modulos.lector_excel import LectorExcel
+
+        lector = LectorExcel(ruta_excel)
+        datos = lector.leer_datos()
+
+        archivos_generados = list(self.carpeta_consentimientos.glob("*.pdf"))
+
+        enviados = 0
+        fallidos = []
+
+        contexto_ssl = ssl.create_default_context()
+
+        with smtplib.SMTP_SSL("smtp.gmail.com", 465, context=contexto_ssl) as server:
+            server.login(gmail_usuario, gmail_app_password)
+
+            for i, registro in enumerate(datos, 1):
+                email_destino = self._encontrar_email(registro)
+                nombre = self._encontrar_nombre(registro)
+                archivo_consentimiento = self._encontrar_consentimiento(registro, archivos_generados)
+
+                if not email_destino or "@" not in email_destino:
+                    fallidos.append({"numero": i, "email": email_destino, "motivo": "Email inválido"})
+                    continue
+
+                if not archivo_consentimiento:
+                    fallidos.append({"numero": i, "email": email_destino, "motivo": "PDF no encontrado"})
+                    continue
+
+                asunto = f"{asunto_base}" if asunto_base else "Consentimiento"
+                
+                # Generar cuerpo personalizado
+                if cuerpo_personalizado:
+                    cuerpo = cuerpo_personalizado.replace("{nombre}", nombre)
+                else:
+                    cuerpo = self._generar_cuerpo_email(nombre)
+
+                mensaje = EmailMessage()
+                if nombre_remitente:
+                    mensaje["From"] = f"{nombre_remitente} <{gmail_usuario}>"
+                else:
+                    mensaje["From"] = gmail_usuario
+                mensaje["To"] = email_destino
+                mensaje["Subject"] = asunto
+                mensaje.set_content(cuerpo)
+
+                tipo_mime, _ = mimetypes.guess_type(archivo_consentimiento)
+                if not tipo_mime:
+                    tipo_mime = "application/pdf"
+                tipo_main, tipo_sub = tipo_mime.split("/", 1)
+
+                with open(archivo_consentimiento, "rb") as f:
+                    mensaje.add_attachment(
+                        f.read(),
+                        maintype=tipo_main,
+                        subtype=tipo_sub,
+                        filename=Path(archivo_consentimiento).name,
+                    )
+
+                try:
+                    server.send_message(mensaje)
+                    enviados += 1
+                except Exception as e:
+                    fallidos.append({"numero": i, "email": email_destino, "motivo": str(e)[:200]})
+
+        return {
+            "total": len(datos),
+            "enviados": enviados,
+            "fallidos": fallidos,
+        }
     
     def _encontrar_email(self, registro: Dict) -> str:
         """Encuentra el email en el registro"""

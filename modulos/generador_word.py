@@ -28,6 +28,41 @@ class GeneradorConsentimientos:
         
         # Crear carpeta de salida si no existe
         self.carpeta_salida.mkdir(parents=True, exist_ok=True)
+        
+        # Verificar que Word esté disponible
+        self._verificar_word_disponible()
+    
+    def _verificar_word_disponible(self):
+        """Verifica que Word esté instalado y disponible"""
+        import subprocess
+        try:
+            # Intentar crear una instancia de Word
+            ps_test = '''
+                try {
+                    $word = New-Object -ComObject Word.Application
+                    $word.Quit()
+                    [System.Runtime.Interopservices.Marshal]::ReleaseComObject($word) | Out-Null
+                    Write-Output "OK"
+                } catch {
+                    Write-Error $_.Exception.Message
+                    exit 1
+                }
+            '''
+            result = subprocess.run(
+                ['powershell', '-ExecutionPolicy', 'Bypass', '-Command', ps_test],
+                capture_output=True,
+                timeout=10,
+                text=True,
+                creationflags=subprocess.CREATE_NO_WINDOW
+            )
+            
+            if result.returncode != 0:
+                raise Exception("Word no está disponible o no tiene permisos")
+                
+        except subprocess.TimeoutExpired:
+            raise Exception("Word no responde. Cierre Word si está abierto e intente de nuevo.")
+        except Exception as e:
+            print(f"⚠ Advertencia: No se pudo verificar Word - {str(e)}")
     
     def obtener_marcadores(self) -> list:
         """
@@ -117,75 +152,94 @@ class GeneradorConsentimientos:
             import subprocess
             import time
             
-            # Cerrar Word si está abierto
-            try:
-                subprocess.run(['taskkill', '/F', '/IM', 'WINWORD.EXE'], 
-                             capture_output=True, timeout=2)
-                time.sleep(0.3)
-            except:
-                pass
-            
-            # Script PowerShell inline
+            # Script PowerShell inline con mejor manejo de errores
             ps_command = f'''
-                $word = New-Object -ComObject Word.Application
-                $word.Visible = $false
-                $word.DisplayAlerts = 0
+                $ErrorActionPreference = 'Stop'
+                $word = $null
                 try {{
-                    $doc = $word.Documents.Open('{str(ruta_word.absolute())}')
-                    $doc.SaveAs('{str(ruta_pdf.absolute())}', 17)
+                    # Crear nueva instancia de Word
+                    $word = New-Object -ComObject Word.Application
+                    $word.Visible = $false
+                    $word.DisplayAlerts = 0
+                    
+                    # Abrir documento
+                    $doc = $word.Documents.Open('{str(ruta_word.absolute())}', $false, $true)
+                    
+                    # Guardar como PDF
+                    $doc.SaveAs([ref]'{str(ruta_pdf.absolute())}', [ref]17)
+                    
+                    # Cerrar documento
                     $doc.Close($false)
+                    
+                    Write-Output "PDF generado exitosamente"
+                }} catch {{
+                    Write-Error "Error: $($_.Exception.Message)"
+                    exit 1
                 }} finally {{
-                    $word.Quit()
-                    [System.Runtime.Interopservices.Marshal]::ReleaseComObject($word) | Out-Null
+                    if ($word -ne $null) {{
+                        $word.Quit()
+                        [System.Runtime.Interopservices.Marshal]::ReleaseComObject($word) | Out-Null
+                    }}
                     [System.GC]::Collect()
                     [System.GC]::WaitForPendingFinalizers()
                 }}
             '''
             
             try:
-                # Ejecutar PowerShell con timeout reducido
+                # Ejecutar PowerShell con timeout ampliado
                 result = subprocess.run(
                     ['powershell', '-ExecutionPolicy', 'Bypass', '-Command', ps_command],
                     capture_output=True,
-                    timeout=15,
-                    text=True
+                    timeout=45,  # Aumentado a 45 segundos
+                    text=True,
+                    creationflags=subprocess.CREATE_NO_WINDOW  # No mostrar ventana
                 )
                 
-                # Esperar brevemente a que se escriba el archivo
-                time.sleep(0.5)
+                # Esperar a que se escriba el archivo
+                time.sleep(0.8)
                 
+                # Verificar si se generó el PDF
                 if not ruta_pdf.exists():
-                    raise Exception(f"PDF no generado. PowerShell error: {result.stderr[:200]}")
+                    error_msg = result.stderr if result.stderr else "Desconocido"
+                    raise Exception(f"PDF no generado. Error: {error_msg[:300]}")
                 
                 print(f"  ✓ PDF generado correctamente")
                     
             except subprocess.TimeoutExpired:
                 # Si hay timeout, intentar matar Word y verificar si el PDF se generó
+                print(f"  ⚠ Timeout detectado, intentando recuperar...")
                 try:
                     subprocess.run(['taskkill', '/F', '/IM', 'WINWORD.EXE'], 
-                                 capture_output=True, timeout=2)
-                    time.sleep(1)
+                                 capture_output=True, timeout=3)
+                    time.sleep(2)
                     if ruta_pdf.exists():
                         print(f"  ✓ PDF generado (Word cerrado forzosamente)")
                     else:
-                        raise Exception("Timeout: Word no responde. Cierre Word manualmente e intente de nuevo.")
+                        raise Exception("Timeout: Word tardó más de 45 segundos. Por favor:\n"
+                                      "1. Cierre Word manualmente si está abierto\n"
+                                      "2. Verifique que Word esté instalado correctamente\n"
+                                      "3. Intente generar menos PDFs a la vez")
                 except:
                     raise Exception("Timeout al convertir a PDF.")
             except Exception as e:
+                if "PDF no generado" in str(e):
+                    raise
                 raise Exception(f"Error al convertir Word a PDF: {str(e)}")
             finally:
-                # Asegurar que Word se cierre
+                # Limpiar siempre - CRÍTICO
                 try:
                     subprocess.run(['taskkill', '/F', '/IM', 'WINWORD.EXE'], 
                                  capture_output=True, timeout=2)
+                    time.sleep(0.3)
                 except:
                     pass
-            
-            # Eliminar archivo Word temporal
-            try:
-                os.remove(ruta_word)
-            except:
-                pass  # Si no se puede eliminar, no es crítico
+                
+                # Eliminar archivo Word temporal siempre
+                try:
+                    if ruta_word.exists():
+                        os.remove(ruta_word)
+                except:
+                    pass
             
             # Añadir campos editables al PDF
             self._anadir_campos_editables(ruta_pdf)
@@ -254,16 +308,19 @@ class GeneradorConsentimientos:
         # Intentar usar nombre y apellido, o DNI, o un identificador genérico
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         
-        # Buscar campos comunes para el nombre
+        # Buscar campos comunes para el nombre (deudor)
         nombre = None
         apellido = None
         dni = None
+        nombre_alumno = None
         
         for clave, valor in datos.items():
             clave_lower = clave.lower()
-            if 'nombre' in clave_lower and not 'apellido' in clave_lower:
+            if 'nombre_alumno' in clave_lower:
+                nombre_alumno = valor
+            elif 'nombre' in clave_lower and 'apellido' not in clave_lower:
                 nombre = valor
-            elif 'apellido' in clave_lower:
+            elif 'apellido' in clave_lower and 'alumno' not in clave_lower:
                 apellido = valor
             elif 'dni' in clave_lower or 'documento' in clave_lower:
                 dni = valor
@@ -276,6 +333,10 @@ class GeneradorConsentimientos:
             partes.append(self._limpiar_nombre(nombre))
         if dni:
             partes.append(self._limpiar_nombre(dni))
+        
+        # Añadir nombre del alumno para diferenciar entre hermanos
+        if nombre_alumno:
+            partes.append(self._limpiar_nombre(nombre_alumno))
         
         if partes:
             nombre_base = "_".join(partes)

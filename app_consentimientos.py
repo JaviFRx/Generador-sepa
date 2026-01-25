@@ -11,6 +11,10 @@ from pathlib import Path
 from datetime import datetime
 import urllib.request
 import json
+import urllib.parse
+import base64
+import hashlib
+from cryptography.fernet import Fernet
 
 
 class AplicacionConsentimientos:
@@ -24,6 +28,10 @@ class AplicacionConsentimientos:
         # Color de fondo
         self.root.configure(bg='#f5f5f5')
         
+        # Archivo de configuración
+        self.ruta_config = Path.home() / ".sepas_config.json"
+        self.config = self._cargar_config()
+        
         # Variables
         self.archivo_excel = tk.StringVar()
         # Buscar plantilla en carpeta docs del software
@@ -31,6 +39,11 @@ class AplicacionConsentimientos:
         ruta_plantilla_default = ruta_software / "docs" / "plantilla_domiciliacion_sepa.docx"
         self.plantilla_word = tk.StringVar(value=str(ruta_plantilla_default))
         self.carpeta_salida = tk.StringVar(value=str(Path.cwd() / "consentimientos_generados"))
+        self.gmail_usuario = tk.StringVar(value=self.config.get("gmail_usuario", ""))
+        self.gmail_app_password = tk.StringVar(value=self.config.get("gmail_app_password", ""))
+        self.gmail_nombre_remitente = tk.StringVar(value=self.config.get("gmail_nombre_remitente", ""))
+        self.email_asunto = tk.StringVar(value=self.config.get("email_asunto", "Mandato SEPA: Confirmación de datos para cobros periódicos"))
+        self.email_cuerpo = self.config.get("email_cuerpo", "")
         
         # Mapeo de columnas Excel a campos de la plantilla
         self.mapeo_campos = {}
@@ -42,14 +55,35 @@ class AplicacionConsentimientos:
     def crear_interfaz(self):
         """Crea la interfaz gráfica de la aplicación"""
         
-        # Frame principal con padding y color de fondo
-        main_frame = tk.Frame(self.root, bg='#f5f5f5', padx=20, pady=10)
-        main_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
+        # Frame principal con scroll
+        canvas = tk.Canvas(self.root, bg='#f5f5f5', highlightthickness=0)
+        scrollbar = ttk.Scrollbar(self.root, orient="vertical", command=canvas.yview)
+        scrollable_frame = tk.Frame(canvas, bg='#f5f5f5', padx=20, pady=10)
         
-        # Configurar peso de filas y columnas
-        self.root.columnconfigure(0, weight=1)
-        self.root.rowconfigure(0, weight=1)
-        main_frame.columnconfigure(1, weight=1)
+        scrollable_frame.bind(
+            "<Configure>",
+            lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
+        )
+        
+        # Ajustar ancho dinámicamente
+        def on_canvas_configure(event):
+            canvas.itemconfig(canvas_window, width=event.width)
+        
+        canvas_window = canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
+        canvas.bind("<Configure>", on_canvas_configure)
+        canvas.configure(yscrollcommand=scrollbar.set)
+        
+        # Bind scroll del ratón
+        def _on_mousewheel(event):
+            canvas.yview_scroll(int(-1*(event.delta/120)), "units")
+        
+        canvas.bind_all("<MouseWheel>", _on_mousewheel)
+        scrollable_frame.bind("<MouseWheel>", _on_mousewheel)
+        
+        canvas.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+        
+        main_frame = scrollable_frame
         
         # Configurar fuentes más grandes
         fuente_titulo = ('Arial', 24, 'bold')
@@ -60,7 +94,7 @@ class AplicacionConsentimientos:
         
         # Banner de título con color de fondo
         banner_frame = tk.Frame(main_frame, bg='#673AB7', relief=tk.RAISED, bd=3)
-        banner_frame.grid(row=0, column=0, columnspan=3, sticky=(tk.W, tk.E), pady=(0, 25))
+        banner_frame.pack(fill=tk.X, pady=(0, 25))
         
         titulo = tk.Label(banner_frame, text="⚕ GENERADOR DE CONSENTIMIENTOS - SEPAS", 
                           font=fuente_titulo, bg='#673AB7', fg='white', pady=15)
@@ -68,52 +102,99 @@ class AplicacionConsentimientos:
         
         # Sección 1: Archivo Excel
         tk.Label(main_frame, text="➊ Archivo Excel con datos:", 
-                 font=fuente_seccion, bg='#f5f5f5', fg='#333').grid(row=1, column=0, columnspan=3, 
-                                                   sticky=tk.W, pady=(10, 5))
+                 font=fuente_seccion, bg='#f5f5f5', fg='#333').pack(anchor=tk.W, pady=(10, 5))
         
-        entry_excel = ttk.Entry(main_frame, textvariable=self.archivo_excel, 
+        excel_frame = tk.Frame(main_frame, bg='#f5f5f5')
+        excel_frame.pack(fill=tk.X, pady=(0, 20))
+        
+        entry_excel = ttk.Entry(excel_frame, textvariable=self.archivo_excel, 
                  width=60, font=fuente_normal)
-        entry_excel.grid(row=2, column=0, columnspan=2, sticky=(tk.W, tk.E), 
-                               padx=(0, 10), pady=5)
-        btn_excel = tk.Button(main_frame, text="📁 Seleccionar Excel", 
+        entry_excel.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 10))
+        btn_excel = tk.Button(excel_frame, text="📁 Seleccionar Excel", 
                   command=self.seleccionar_excel, font=fuente_boton,
                   bg='#4CAF50', fg='white', activebackground='#45a049',
                   cursor='hand2', relief=tk.RAISED, bd=3, padx=20, pady=10)
-        btn_excel.grid(row=2, column=2, sticky=tk.W, padx=5)
+        btn_excel.pack(side=tk.LEFT)
         
         # Sección 2: Plantilla Word
         tk.Label(main_frame, text="➋ Plantilla Word (consentimiento):", 
-                 font=fuente_seccion, bg='#f5f5f5', fg='#333').grid(row=3, column=0, columnspan=3, 
-                                                   sticky=tk.W, pady=(20, 5))
+                 font=fuente_seccion, bg='#f5f5f5', fg='#333').pack(anchor=tk.W, pady=(20, 5))
         
-        entry_word = ttk.Entry(main_frame, textvariable=self.plantilla_word, 
+        word_frame = tk.Frame(main_frame, bg='#f5f5f5')
+        word_frame.pack(fill=tk.X, pady=(0, 20))
+        
+        entry_word = ttk.Entry(word_frame, textvariable=self.plantilla_word, 
                  width=60, font=fuente_normal)
-        entry_word.grid(row=4, column=0, columnspan=2, sticky=(tk.W, tk.E), 
-                               padx=(0, 10), pady=5)
-        btn_word = tk.Button(main_frame, text="📄 Seleccionar Plantilla", 
+        entry_word.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 10))
+        btn_word = tk.Button(word_frame, text="📄 Seleccionar Plantilla", 
                   command=self.seleccionar_plantilla, font=fuente_boton,
                   bg='#2196F3', fg='white', activebackground='#0b7dda',
                   cursor='hand2', relief=tk.RAISED, bd=3, padx=20, pady=10)
-        btn_word.grid(row=4, column=2, sticky=tk.W, padx=5)
+        btn_word.pack(side=tk.LEFT)
         
         # Sección 3: Carpeta de salida
         tk.Label(main_frame, text="➌ Carpeta para guardar consentimientos:", 
-                 font=fuente_seccion, bg='#f5f5f5', fg='#333').grid(row=5, column=0, columnspan=3, 
-                                                   sticky=tk.W, pady=(20, 5))
+                 font=fuente_seccion, bg='#f5f5f5', fg='#333').pack(anchor=tk.W, pady=(20, 5))
         
-        entry_salida = ttk.Entry(main_frame, textvariable=self.carpeta_salida, 
+        carpeta_frame = tk.Frame(main_frame, bg='#f5f5f5')
+        carpeta_frame.pack(fill=tk.X, pady=(0, 20))
+        
+        entry_salida = ttk.Entry(carpeta_frame, textvariable=self.carpeta_salida, 
                  width=60, font=fuente_normal)
-        entry_salida.grid(row=6, column=0, columnspan=2, sticky=(tk.W, tk.E), 
-                               padx=(0, 10), pady=5)
-        btn_carpeta = tk.Button(main_frame, text="📂 Seleccionar Carpeta", 
+        entry_salida.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 10))
+        btn_carpeta = tk.Button(carpeta_frame, text="📂 Seleccionar Carpeta", 
                   command=self.seleccionar_carpeta, font=fuente_boton,
                   bg='#FF9800', fg='white', activebackground='#e68900',
                   cursor='hand2', relief=tk.RAISED, bd=3, padx=20, pady=10)
-        btn_carpeta.grid(row=6, column=2, sticky=tk.W, padx=5)
+        btn_carpeta.pack(side=tk.LEFT)
+
+        # Sección 4: Cuenta Gmail para envío
+        tk.Label(main_frame, text="➍ Cuenta Gmail para envío (opcional):", 
+                 font=fuente_seccion, bg='#f5f5f5', fg='#333').pack(anchor=tk.W, pady=(20, 5))
+
+        gmail_frame = tk.Frame(main_frame, bg='#f5f5f5')
+        gmail_frame.pack(fill=tk.X, pady=(0, 20))
+
+        tk.Label(gmail_frame, text="Correo Gmail:", font=fuente_normal, bg='#f5f5f5').pack(anchor=tk.W, pady=(0, 3))
+        entry_gmail = ttk.Entry(gmail_frame, textvariable=self.gmail_usuario, width=60, font=fuente_normal)
+        entry_gmail.pack(fill=tk.X, pady=(0, 10))
+
+        tk.Label(gmail_frame, text="Contraseña de aplicación:", font=fuente_normal, bg='#f5f5f5').pack(anchor=tk.W, pady=(0, 3))
+        entry_gmail_pass = ttk.Entry(
+            gmail_frame, textvariable=self.gmail_app_password, width=60, font=fuente_normal, show="*"
+        )
+        entry_gmail_pass.pack(fill=tk.X, pady=(0, 10))
+
+        tk.Label(gmail_frame, text="Nombre remitente (opcional):", font=fuente_normal, bg='#f5f5f5').pack(anchor=tk.W, pady=(0, 3))
+        entry_gmail_nombre = ttk.Entry(
+            gmail_frame, textvariable=self.gmail_nombre_remitente, width=60, font=fuente_normal
+        )
+        entry_gmail_nombre.pack(fill=tk.X, pady=(0, 5))
+
+        tk.Label(
+            gmail_frame,
+            text="Usa una contraseña de aplicación de Gmail (no tu contraseña normal).",
+            font=('Arial', 9),
+            bg='#f5f5f5',
+            fg='#666'
+        ).pack(anchor=tk.W, pady=(2, 6))
+        
+        # Botón guardar configuración Gmail
+        btn_guardar_gmail = tk.Button(
+            gmail_frame,
+            text="💾 Guardar Configuración",
+            command=self._guardar_config,
+            font=('Arial', 9),
+            bg='#673AB7', fg='white',
+            activebackground='#512DA8',
+            cursor='hand2', relief=tk.RAISED, bd=2,
+            padx=15, pady=5
+        )
+        btn_guardar_gmail.pack(anchor=tk.W, pady=(5, 0))
         
         # Botón principal
         btn_frame = tk.Frame(main_frame, bg='#f5f5f5')
-        btn_frame.grid(row=7, column=0, columnspan=3, pady=30)
+        btn_frame.pack(pady=30)
         
         # Botón principal de generar - MÁS GRANDE Y LLAMATIVO
         self.btn_generar = tk.Button(btn_frame, 
@@ -135,6 +216,15 @@ class AplicacionConsentimientos:
                               cursor='hand2', relief=tk.RAISED, bd=4,
                               padx=30, pady=20, width=20, height=4)
         btn_emails.pack(side=tk.LEFT, padx=10)
+
+        btn_enviar = tk.Button(btn_frame, text="📤 ENVIAR\nEMAILS\n(Gmail)", 
+                      command=self.enviar_emails_gmail,
+                      font=fuente_boton,
+                      bg='#F44336', fg='white',
+                      activebackground='#D32F2F',
+                      cursor='hand2', relief=tk.RAISED, bd=4,
+                      padx=30, pady=20, width=20, height=4)
+        btn_enviar.pack(side=tk.LEFT, padx=10)
         
         # Botón para abrir carpeta
         btn_abrir_carpeta = tk.Button(btn_frame, text="📁 ABRIR\nCARPETA\nDE PDFs", 
@@ -147,31 +237,22 @@ class AplicacionConsentimientos:
         btn_abrir_carpeta.pack(side=tk.LEFT, padx=10)
         
         # Separador
-        ttk.Separator(main_frame, orient='horizontal').grid(row=8, column=0, 
-                                                            columnspan=3, 
-                                                            sticky=(tk.W, tk.E), 
-                                                            pady=10)
+        ttk.Separator(main_frame, orient='horizontal').pack(fill=tk.X, pady=10)
         
         # Área de log
         tk.Label(main_frame, text="► Registro de actividad:", 
-                 font=fuente_seccion, bg='#f5f5f5', fg='#333').grid(row=9, column=0, columnspan=3, 
-                                                   sticky=tk.W, pady=(10, 5))
+                 font=fuente_seccion, bg='#f5f5f5', fg='#333').pack(anchor=tk.W, pady=(10, 5))
         
-        self.log_text = scrolledtext.ScrolledText(main_frame, height=15, width=80, 
+        self.log_text = scrolledtext.ScrolledText(main_frame, height=12, width=80, 
                                                   wrap=tk.WORD, font=fuente_normal)
-        self.log_text.grid(row=10, column=0, columnspan=3, sticky=(tk.W, tk.E, tk.N, tk.S), 
-                          pady=(0, 10))
-        
-        # Configurar expansión del log
-        main_frame.rowconfigure(10, weight=1)
+        self.log_text.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
         
         # Botón limpiar log
         btn_limpiar = tk.Button(main_frame, text="🗑️ Limpiar Log", 
                   command=self.limpiar_log, font=fuente_boton,
                   bg='#607D8B', fg='white', activebackground='#455A64',
                   cursor='hand2', relief=tk.RAISED, bd=2, padx=15, pady=8)
-        btn_limpiar.grid(row=11, column=0, columnspan=3, pady=10)
-        
+        btn_limpiar.pack(pady=10)
         # Agregar mensaje inicial
         self.agregar_log("Sistema iniciado. Seleccione el archivo Excel y la plantilla Word.")
         self.agregar_log("=" * 80)
@@ -221,6 +302,68 @@ class AplicacionConsentimientos:
     def limpiar_log(self):
         """Limpia el área de log"""
         self.log_text.delete(1.0, tk.END)
+    
+    def _obtener_clave_encriptacion(self) -> bytes:
+        """Obtiene una clave de encriptación basada en el usuario del sistema"""
+        usuario = os.getenv('USERNAME', 'usuario_desconocido')
+        # Crear una clave determinística basada en el usuario
+        hash_usuario = hashlib.sha256(usuario.encode()).digest()
+        # Fernet requiere una clave en base64
+        clave = base64.urlsafe_b64encode(hash_usuario[:32])
+        return clave
+    
+    def _encriptar_texto(self, texto: str) -> str:
+        """Encripta un texto"""
+        try:
+            clave = self._obtener_clave_encriptacion()
+            fernet = Fernet(clave)
+            texto_encriptado = fernet.encrypt(texto.encode())
+            return base64.b64encode(texto_encriptado).decode()
+        except Exception:
+            # Si falla, devolver el texto en plano
+            return texto
+    
+    def _desencriptar_texto(self, texto_encriptado: str) -> str:
+        """Desencripta un texto"""
+        try:
+            clave = self._obtener_clave_encriptacion()
+            fernet = Fernet(clave)
+            texto_decodificado = base64.b64decode(texto_encriptado.encode())
+            texto_desencriptado = fernet.decrypt(texto_decodificado)
+            return texto_desencriptado.decode()
+        except Exception:
+            # Si falla, devolver el texto como está (probablemente ya estaba en plano)
+            return texto_encriptado
+    
+    def _cargar_config(self) -> dict:
+        """Carga la configuración guardada"""
+        try:
+            if self.ruta_config.exists():
+                with open(self.ruta_config, 'r', encoding='utf-8') as f:
+                    config = json.load(f)
+                    # Desencriptar contraseña si está encriptada
+                    if 'gmail_app_password' in config and config['gmail_app_password']:
+                        config['gmail_app_password'] = self._desencriptar_texto(config['gmail_app_password'])
+                    return config
+        except:
+            pass
+        return {}
+    
+    def _guardar_config(self):
+        """Guarda la configuración actual"""
+        try:
+            config = {
+                "gmail_usuario": self.gmail_usuario.get(),
+                "gmail_app_password": self._encriptar_texto(self.gmail_app_password.get()),
+                "gmail_nombre_remitente": self.gmail_nombre_remitente.get(),
+                "email_asunto": self.email_asunto.get(),
+                "email_cuerpo": self.email_cuerpo,
+            }
+            with open(self.ruta_config, 'w', encoding='utf-8') as f:
+                json.dump(config, f, ensure_ascii=False, indent=2)
+            self.agregar_log(f"✓ Configuración guardada (contraseña encriptada)")
+        except Exception as e:
+            self.agregar_log(f"⚠ Advertencia: No se pudo guardar configuración: {str(e)}")
         
     def validar_archivos(self):
         """Valida que los archivos necesarios estén seleccionados"""
@@ -256,13 +399,36 @@ class AplicacionConsentimientos:
         try:
             from modulos.lector_excel import LectorExcel
             from modulos.generador_word import GeneradorConsentimientos
+            import subprocess
+            import time
             
             self.agregar_log("=" * 80)
             self.agregar_log("Iniciando proceso de generación de consentimientos en PDF...")
             
+            # Cerrar cualquier proceso de Word previo
+            self.agregar_log("Cerrando procesos previos de Word...")
+            try:
+                subprocess.run(['taskkill', '/F', '/IM', 'WINWORD.EXE'], 
+                             capture_output=True, timeout=3)
+                time.sleep(1)
+                self.agregar_log("✓ Procesos de Word cerrados")
+            except:
+                pass
+            
             # Crear carpeta de salida si no existe
             carpeta_salida = Path(self.carpeta_salida.get())
             carpeta_salida.mkdir(parents=True, exist_ok=True)
+            
+            # Limpiar todos los archivos de la carpeta
+            archivos_antiguos = [f for f in carpeta_salida.iterdir() if f.is_file()]
+            if archivos_antiguos:
+                self.agregar_log(f"🗑 Eliminando {len(archivos_antiguos)} archivos antiguos de la carpeta...")
+                for archivo in archivos_antiguos:
+                    try:
+                        archivo.unlink()
+                    except Exception as e:
+                        self.agregar_log(f"  ⚠ No se pudo eliminar {archivo.name}: {str(e)}")
+                self.agregar_log("✓ Carpeta limpiada")
             
             # Leer datos del Excel
             self.agregar_log(f"Leyendo datos de: {Path(self.archivo_excel.get()).name}")
@@ -270,10 +436,6 @@ class AplicacionConsentimientos:
             datos = lector.leer_datos()
             
             self.agregar_log(f"✓ Se encontraron {len(datos)} registros en el Excel")
-            self.agregar_log("⚠️ MODO PRUEBA: Solo se generará el PDF del PRIMER USUARIO")
-            
-            # Tomar solo el primer registro
-            datos = datos[:1] if datos else []
             
             if not datos:
                 self.agregar_log("✗ Error: No hay datos en el Excel")
@@ -325,6 +487,15 @@ class AplicacionConsentimientos:
                 
                 datos_mapeados.append(registro_nuevo)
             
+            # Determinar tamaño de lote óptimo
+            TAMANO_LOTE = 10
+            total_registros = len(datos_mapeados)
+            num_lotes = (total_registros + TAMANO_LOTE - 1) // TAMANO_LOTE
+            
+            if total_registros > TAMANO_LOTE:
+                self.agregar_log(f"📦 Procesamiento en lotes de {TAMANO_LOTE} registros")
+                self.agregar_log(f"   Total de lotes: {num_lotes}")
+            
             # Generar consentimientos
             generador = GeneradorConsentimientos(self.plantilla_word.get(), 
                                                 str(carpeta_salida))
@@ -332,16 +503,42 @@ class AplicacionConsentimientos:
             consentimientos_generados = []
             errores = 0
             
-            for i, registro in enumerate(datos_mapeados, 1):
-                try:
-                    # Mostrar qué datos se están usando
-                    self.agregar_log(f"  Datos para registro {i}: {registro}")
-                    archivo_generado = generador.generar_consentimiento(registro)
-                    consentimientos_generados.append(archivo_generado)
-                    self.agregar_log(f"  [{i}/{len(datos_mapeados)}] ✓ Generado: {Path(archivo_generado).name}")
-                except Exception as e:
-                    errores += 1
-                    self.agregar_log(f"  [{i}/{len(datos_mapeados)}] ✗ Error: {str(e)}")
+            for lote_num in range(num_lotes):
+                inicio_lote = lote_num * TAMANO_LOTE
+                fin_lote = min((lote_num + 1) * TAMANO_LOTE, total_registros)
+                registros_lote = datos_mapeados[inicio_lote:fin_lote]
+                
+                if num_lotes > 1:
+                    self.agregar_log(f"\n📦 LOTE {lote_num + 1}/{num_lotes} - Registros {inicio_lote + 1} a {fin_lote}")
+                
+                # Procesar registros del lote
+                for i, registro in enumerate(registros_lote, inicio_lote + 1):
+                    try:
+                        archivo_generado = generador.generar_consentimiento(registro)
+                        consentimientos_generados.append(archivo_generado)
+                        self.agregar_log(f"  [{i}/{total_registros}] ✓ Generado: {Path(archivo_generado).name}")
+                    except Exception as e:
+                        errores += 1
+                        self.agregar_log(f"  [{i}/{total_registros}] ✗ Error: {str(e)}")
+                
+                # Pausa entre lotes para dar tiempo a Word
+                if lote_num < num_lotes - 1:  # No pausar después del último lote
+                    self.agregar_log(f"   ⏸ Pausa de 3 segundos antes del siguiente lote...")
+                    # Cerrar procesos de Word para limpiar
+                    try:
+                        subprocess.run(['taskkill', '/F', '/IM', 'WINWORD.EXE'], 
+                                     capture_output=True, timeout=2)
+                    except:
+                        pass
+                    time.sleep(3)
+            
+            # Limpieza final de Word
+            self.agregar_log("🧹 Limpieza final de procesos de Word...")
+            try:
+                subprocess.run(['taskkill', '/F', '/IM', 'WINWORD.EXE'], 
+                             capture_output=True, timeout=2)
+            except:
+                pass
             
             self.agregar_log("=" * 80)
             self.agregar_log(f"RESUMEN: {len(consentimientos_generados)} consentimientos generados correctamente")
@@ -362,35 +559,181 @@ class AplicacionConsentimientos:
             messagebox.showerror("Error", f"Error al generar consentimientos:\n{str(e)}")
             
     def preparar_emails(self):
-        """Prepara los emails con los consentimientos adjuntos"""
-        carpeta_salida = Path(self.carpeta_salida.get())
+        """Abre ventana para configurar asunto y cuerpo del email"""
+        # Crear ventana de configuración
+        ventana_config = tk.Toplevel(self.root)
+        ventana_config.title("Configurar Emails")
+        ventana_config.geometry("800x600")
+        ventana_config.resizable(True, True)
+        ventana_config.transient(self.root)
+        ventana_config.grab_set()
         
+        # Centrar ventana
+        ventana_config.update_idletasks()
+        x = self.root.winfo_x() + (self.root.winfo_width() // 2) - (800 // 2)
+        y = self.root.winfo_y() + (self.root.winfo_height() // 2) - (600 // 2)
+        ventana_config.geometry(f"+{x}+{y}")
+        
+        # Frame principal
+        frame = tk.Frame(ventana_config, padx=20, pady=20, bg='#f5f5f5')
+        frame.pack(fill=tk.BOTH, expand=True)
+        
+        # Título
+        titulo = tk.Label(frame, 
+                        text="📧 Configurar Asunto y Cuerpo del Email", 
+                        font=('Arial', 16, 'bold'),
+                        bg='#f5f5f5', fg='#333')
+        titulo.pack(pady=(0, 20))
+        
+        instruccion = tk.Label(frame,
+                             text="Esta configuración se guardará y se usará siempre que envíes emails.",
+                             font=('Arial', 10),
+                             bg='#f5f5f5', fg='#555')
+        instruccion.pack(pady=(0, 15))
+        
+        # Sección Asunto
+        tk.Label(frame, text="Asunto del email:", font=('Arial', 11, 'bold'), 
+                bg='#f5f5f5', fg='#333').pack(anchor=tk.W, pady=(10, 5))
+        
+        entry_asunto = ttk.Entry(frame, font=('Arial', 11), width=80)
+        entry_asunto.insert(0, self.email_asunto.get())
+        entry_asunto.pack(fill=tk.X, pady=(0, 20))
+        
+        # Sección Cuerpo
+        tk.Label(frame, text="Cuerpo del email:", font=('Arial', 11, 'bold'),
+                bg='#f5f5f5', fg='#333').pack(anchor=tk.W, pady=(10, 5))
+        
+        tk.Label(frame, text="Usa {nombre} para personalizar con el nombre de cada destinatario",
+                font=('Arial', 9), bg='#f5f5f5', fg='#666').pack(anchor=tk.W, pady=(0, 5))
+        
+        # Texto por defecto si no hay nada guardado
+        texto_defecto = """Estimado/a {nombre},
+
+Adjunto encontrará el Mandato de domiciliación SEPA necesario para gestionar los cobros de su servicio de forma automática a través de su cuenta bancaria.
+
+Pasos para completar el proceso:
+
+1. Descargue y revise el documento adjunto
+
+2. Firme el documento (se acepta firma manuscrita escaneada o firma digital).
+
+3. Responda a este mismo correo adjuntando el documento firmado.
+
+Este trámite es indispensable para asegurar que sus pagos se procesen correctamente y sin interrupciones.
+
+Si tiene alguna pregunta o inquietud, no dude en contactarnos respondiendo a este mensaje.
+
+Saludos cordiales,
+
+Isabel Garcia Rincon
+Gfg Kids"""
+        
+        text_cuerpo = scrolledtext.ScrolledText(frame, height=14, width=80, 
+                                               wrap=tk.WORD, font=('Arial', 10))
+        text_cuerpo.insert(1.0, self.email_cuerpo if self.email_cuerpo else texto_defecto)
+        text_cuerpo.pack(fill=tk.BOTH, expand=True, pady=(0, 20))
+        
+        # Botones
+        btn_frame = tk.Frame(frame, bg='#f5f5f5')
+        btn_frame.pack(fill=tk.X, pady=10)
+        
+        def guardar_config_email():
+            asunto = entry_asunto.get().strip()
+            cuerpo = text_cuerpo.get(1.0, tk.END).strip()
+            
+            if not asunto or not cuerpo:
+                messagebox.showwarning("Datos incompletos", "Introduce asunto y cuerpo")
+                return
+            
+            # Guardar en variables
+            self.email_asunto.set(asunto)
+            self.email_cuerpo = cuerpo
+            
+            # Guardar en archivo de configuración
+            self._guardar_config()
+            
+            ventana_config.destroy()
+            messagebox.showinfo("Configuración guardada", 
+                              "Los datos se guardarán y se usarán para futuros envíos.")
+        
+        btn_guardar = tk.Button(btn_frame, text="💾 Guardar Configuración",
+                              command=guardar_config_email,
+                              font=('Arial', 12, 'bold'),
+                              bg='#4CAF50', fg='white',
+                              activebackground='#45a049',
+                              cursor='hand2', relief=tk.RAISED, bd=3,
+                              padx=30, pady=10)
+        btn_guardar.pack(side=tk.LEFT, padx=10)
+        
+        btn_cancelar = tk.Button(btn_frame, text="✗ Cancelar",
+                               command=ventana_config.destroy,
+                               font=('Arial', 12, 'bold'),
+                               bg='#f44336', fg='white',
+                               activebackground='#da190b',
+                               cursor='hand2', relief=tk.RAISED, bd=3,
+                               padx=30, pady=10)
+        btn_cancelar.pack(side=tk.LEFT, padx=10)
+
+    def enviar_emails_gmail(self):
+        """Envía los emails por Gmail usando la cuenta indicada"""
+        carpeta_salida = Path(self.carpeta_salida.get())
+
         if not carpeta_salida.exists():
             messagebox.showerror("Error", "No hay consentimientos generados")
             return
-            
+
+        gmail_usuario = self.gmail_usuario.get().strip()
+        gmail_app_password = self.gmail_app_password.get().strip()
+        nombre_remitente = self.gmail_nombre_remitente.get().strip()
+
+        if not gmail_usuario or not gmail_app_password:
+            messagebox.showwarning(
+                "Datos incompletos",
+                "Indica el correo Gmail y la contraseña de aplicación para poder enviar."
+            )
+            return
+        
+        # Guardar configuración para próxima vez
+        self._guardar_config()
+
+        confirmar = messagebox.askyesno(
+            "Confirmar envío",
+            "¿Deseas enviar los emails ahora desde la cuenta indicada?"
+        )
+        if not confirmar:
+            return
+
         try:
             from modulos.preparador_emails import PreparadorEmails
-            
+
             self.agregar_log("=" * 80)
-            self.agregar_log("Preparando emails...")
-            
+            self.agregar_log("Enviando emails por Gmail...")
+
             preparador = PreparadorEmails(str(carpeta_salida))
-            resultado = preparador.crear_borradores_email(self.archivo_excel.get())
-            
-            self.agregar_log(f"✓ Se prepararon {len(resultado)} borradores de email")
-            self.agregar_log(f"✓ Archivo de emails generado en: {carpeta_salida}")
-            
-            messagebox.showinfo("Completado", 
-                              f"Se prepararon {len(resultado)} emails\n"
-                              "Revise el archivo 'emails_para_enviar.txt' en la carpeta de salida")
-            
-        except ImportError:
-            self.agregar_log("✗ Error: Módulo preparador_emails no encontrado")
-            messagebox.showerror("Error", "Módulo preparador_emails no encontrado")
+            resultado = preparador.enviar_emails_gmail(
+                self.archivo_excel.get(),
+                gmail_usuario,
+                gmail_app_password,
+                nombre_remitente=nombre_remitente or None,
+                asunto_base=self.email_asunto.get(),
+                cuerpo_personalizado=self.email_cuerpo,
+            )
+
+            self.agregar_log(f"✓ Enviados: {resultado['enviados']} / {resultado['total']}")
+            if resultado["fallidos"]:
+                self.agregar_log(f"✗ Fallidos: {len(resultado['fallidos'])}")
+                for fallo in resultado["fallidos"][:10]:
+                    self.agregar_log(f"  - #{fallo['numero']} {fallo['email']}: {fallo['motivo']}")
+
+            messagebox.showinfo(
+                "Envío completado",
+                f"Enviados: {resultado['enviados']}\n"
+                f"Fallidos: {len(resultado['fallidos'])}"
+            )
+
         except Exception as e:
-            self.agregar_log(f"✗ Error: {str(e)}")
-            messagebox.showerror("Error", f"Error al preparar emails:\n{str(e)}")
+            self.agregar_log(f"✗ Error al enviar emails: {str(e)}")
+            messagebox.showerror("Error", f"Error al enviar emails:\n{str(e)}")
     
     def abrir_carpeta_salida(self):
         """Abre la carpeta donde se guardaron los PDFs"""
