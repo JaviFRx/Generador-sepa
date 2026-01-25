@@ -161,4 +161,4 @@ Para preguntas o problemas, contacta al administrador del sistema.
 
 ---
 
-Repositorio personal de Javier Fernández Ramos. Derechos del software pertenecen a SEPAS.
+Software propiedad de Javier Fernández Ramos. Uso sujeto a autorización del autor.
