@@ -3,7 +3,6 @@ Módulo para generar consentimientos en formato PDF desde plantilla Word
 """
 
 from docx import Document
-from docx2pdf import convert
 from pathlib import Path
 from typing import Dict
 from datetime import datetime
@@ -114,20 +113,82 @@ class GeneradorConsentimientos:
             nombre_archivo_pdf = nombre_archivo_word.replace('.docx', '.pdf')
             ruta_pdf = self.carpeta_salida / nombre_archivo_pdf
             
-            try:
-                convert(str(ruta_word), str(ruta_pdf))
-            except Exception as e:
-                # Si falla la conversión, dar más información
-                raise Exception(f"Error al convertir Word a PDF: {str(e)}. "
-                              f"Asegúrese de que Microsoft Word esté instalado y cerrado. "
-                              f"El archivo Word temporal está en: {ruta_word}")
+            # Usar PowerShell para conversión más rápida
+            import subprocess
+            import time
             
-            # Eliminar archivo Word temporal solo si la conversión fue exitosa
-            if ruta_pdf.exists():
-                os.remove(ruta_word)
+            # Cerrar Word si está abierto
+            try:
+                subprocess.run(['taskkill', '/F', '/IM', 'WINWORD.EXE'], 
+                             capture_output=True, timeout=2)
+                time.sleep(0.3)
+            except:
+                pass
+            
+            # Script PowerShell inline
+            ps_command = f'''
+                $word = New-Object -ComObject Word.Application
+                $word.Visible = $false
+                $word.DisplayAlerts = 0
+                try {{
+                    $doc = $word.Documents.Open('{str(ruta_word.absolute())}')
+                    $doc.SaveAs('{str(ruta_pdf.absolute())}', 17)
+                    $doc.Close($false)
+                }} finally {{
+                    $word.Quit()
+                    [System.Runtime.Interopservices.Marshal]::ReleaseComObject($word) | Out-Null
+                    [System.GC]::Collect()
+                    [System.GC]::WaitForPendingFinalizers()
+                }}
+            '''
+            
+            try:
+                # Ejecutar PowerShell con timeout reducido
+                result = subprocess.run(
+                    ['powershell', '-ExecutionPolicy', 'Bypass', '-Command', ps_command],
+                    capture_output=True,
+                    timeout=15,
+                    text=True
+                )
                 
-                # Añadir campos editables al PDF
-                self._anadir_campos_editables(ruta_pdf)
+                # Esperar brevemente a que se escriba el archivo
+                time.sleep(0.5)
+                
+                if not ruta_pdf.exists():
+                    raise Exception(f"PDF no generado. PowerShell error: {result.stderr[:200]}")
+                
+                print(f"  ✓ PDF generado correctamente")
+                    
+            except subprocess.TimeoutExpired:
+                # Si hay timeout, intentar matar Word y verificar si el PDF se generó
+                try:
+                    subprocess.run(['taskkill', '/F', '/IM', 'WINWORD.EXE'], 
+                                 capture_output=True, timeout=2)
+                    time.sleep(1)
+                    if ruta_pdf.exists():
+                        print(f"  ✓ PDF generado (Word cerrado forzosamente)")
+                    else:
+                        raise Exception("Timeout: Word no responde. Cierre Word manualmente e intente de nuevo.")
+                except:
+                    raise Exception("Timeout al convertir a PDF.")
+            except Exception as e:
+                raise Exception(f"Error al convertir Word a PDF: {str(e)}")
+            finally:
+                # Asegurar que Word se cierre
+                try:
+                    subprocess.run(['taskkill', '/F', '/IM', 'WINWORD.EXE'], 
+                                 capture_output=True, timeout=2)
+                except:
+                    pass
+            
+            # Eliminar archivo Word temporal
+            try:
+                os.remove(ruta_word)
+            except:
+                pass  # Si no se puede eliminar, no es crítico
+            
+            # Añadir campos editables al PDF
+            self._anadir_campos_editables(ruta_pdf)
             
             return str(ruta_pdf)
             
@@ -238,7 +299,9 @@ class GeneradorConsentimientos:
         # Reemplazar espacios por guiones bajos
         texto = texto.replace(' ', '_')
         # Limitar longitud
-        texto = texto[:50]    
+        texto = texto[:50]
+        return texto
+    
     def _anadir_campos_editables(self, ruta_pdf: Path):
         """
         Añade campos de formulario editables al PDF
@@ -338,4 +401,4 @@ class GeneradorConsentimientos:
             NameObject("/F"): NumberObject(4),  # Flags: imprimible
         })
         
-        return widget        return texto
+        return widget

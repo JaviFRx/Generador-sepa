@@ -45,3 +45,4 @@ consentimientos_generados/
 # Archivos temporales
 *.tmp
 *.log
+.tmp.driveupload/
