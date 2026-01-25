@@ -38,7 +38,9 @@ Sistema automatizado para generar documentos de domiciliación bancaria SEPA (Si
 - **Microsoft Word** (para conversión a PDF)
 - **Conexión a internet** (opcional, para auto-completado geográfico)
 
-## 🚀 Instalación
+## 🚀 Instalación / Ejecución rápida
+
+Si solo quieres usar el programa sin instalar Python, ejecuta directamente el archivo: `dist/Generador_Consentimientos_SEPAS.exe`.
 
 ### 1️⃣ Clonar el repositorio
 
@@ -80,6 +82,8 @@ cryptography==42.0.0  # Encriptación de credenciales
 
 ### 1. Ejecutar la aplicación
 
+- Opción A (rápida, sin Python): `dist/Generador_Consentimientos_SEPAS.exe`
+- Opción B (con Python):
 ```bash
 python app_consentimientos.py
 ```

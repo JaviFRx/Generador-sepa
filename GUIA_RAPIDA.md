@@ -8,6 +8,8 @@ pip install -r requirements.txt
 ```
 
 ### 2️⃣ Ejecutar la Aplicación
+- Opción A (sin instalar nada): ejecuta el archivo `dist/Generador_Consentimientos_SEPAS.exe`
+- Opción B (con Python):
 ```bash
 python app_consentimientos.py
 ```
