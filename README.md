@@ -13,7 +13,10 @@ Sistema automatizado para generar documentos de domiciliación bancaria SEPA (Si
 - 🤖 **Auto-detección inteligente**: Reconoce automáticamente columnas por palabras clave (español/catalán)
 - 🌍 **Auto-completado geográfico**: Busca automáticamente código postal ↔ población/provincia
 - 📝 **PDF con campos editables**: Genera PDFs con campos de fecha, localidad y firma editables
-- 📧 **Preparación de emails**: Crea borradores de correos listos para enviar
+- 📧 **Envío de emails por Gmail**: Envía automáticamente los PDFs a través de tu cuenta de Gmail
+- 💾 **Configuración persistente**: Guarda credenciales y configuración de emails para reutilizar
+- 🔐 **Encriptación de credenciales**: Contraseña de Gmail encriptada y segura
+- 📋 **Personalización de emails**: Configura asunto y cuerpo del email con variables como `{nombre}`
 - 🎨 **Interfaz moderna**: GUI intuitiva con diseño colorido y responsive
 - 📁 **Gestión de archivos**: Apertura directa de carpeta de salida
 
@@ -69,6 +72,8 @@ openpyxl==3.1.2       # Lectura de archivos Excel
 python-docx==1.1.0    # Manipulación de documentos Word
 docx2pdf==0.1.8       # Conversión de Word a PDF
 pypdf==6.6.1          # Creación de campos editables en PDF
+pywin32==311          # Interacción con Word en Windows
+cryptography==42.0.0  # Encriptación de credenciales
 ```
 
 ## 🎯 Uso Básico
@@ -78,6 +83,15 @@ pypdf==6.6.1          # Creación de campos editables en PDF
 ```bash
 python app_consentimientos.py
 ```
+
+### 2. Flujo de trabajo completo
+
+1. **Selecciona Excel** → Se abre ventana de mapeo automático
+2. **Configura mapeo** → Asigna columnas del Excel a campos de la plantilla
+3. **Selecciona plantilla Word** → Documento con los marcadores `{{campo}}`
+4. **Genera PDFs** → Crea archivos PDF individuales con campos editables
+5. **Prepara Emails** → Configura asunto y cuerpo, genera borradores
+6. **Envía por Gmail** → Envía automáticamente a través de tu cuenta
 
 ### 2. Preparar tu plantilla Word
 
@@ -98,6 +112,26 @@ En {{localidad_firma}}, a {{fecha}}
 
 Firma del deudor: {{firma}}
 ```
+
+### 3. Configurar cuenta Gmail para envío
+
+Para enviar emails directamente desde la app:
+
+1. **Activa verificación en 2 pasos** en tu cuenta Google
+2. **Ve a** https://myaccount.google.com/apppasswords
+3. **Genera contraseña** para "Mail" y "Windows"
+4. **Copia la contraseña** en la app (campo "Contraseña de aplicación")
+5. Haz click en **"💾 Guardar Configuración"**
+
+La contraseña se guardará **encriptada** y se reutilizará automáticamente.
+
+### 4. Personalizar emails
+
+En la ventana de **"Preparar Emails"**:
+- Configura el **asunto** (ej: "Mandato SEPA: Confirmación de datos para cobros periódicos")
+- Edita el **cuerpo** del email
+- Usa `{nombre}` para personalizar automáticamente (se reemplaza con cada destinatario)
+- Click en **"Guardar y Generar Borradores"**
 
 ### 3. Preparar tu Excel
 
@@ -318,41 +352,90 @@ Sepas/
 
 Al ejecutar el programa, se crearán:
 
-1. **Consentimientos individuales**: 
-   - Formato: `Apellido_Nombre_DNI.docx`
-   - Ubicación: Carpeta de salida seleccionada
+1. **Consentimientos individuales (PDFs)**: 
+   - Con campos editables para fecha, localidad y firma
+   - Nombrados automáticamente según datos del Excel
 
-2. **Lista de emails** (`emails_para_enviar.txt`):
+2. **Lista de borradores** (`emails_para_enviar.txt`):
    - Contiene todos los borradores de email
    - Incluye destinatario, asunto y cuerpo del mensaje
+   - Útil para revisar antes de enviar
 
 3. **CSV de emails** (`emails_lista.csv`):
    - Formato CSV para importar a clientes de correo
-   - Útil para envíos masivos
+   - Contiene email, nombre, asunto y archivo adjunto
+
+4. **Configuración guardada** (`~/.sepas_config.json`):
+   - Credenciales de Gmail (encriptadas)
+   - Configuración de emails (asunto y cuerpo)
+   - Se carga automáticamente al abrir la app
+
+## 🔐 Seguridad
+
+- **Credenciales encriptadas**: La contraseña de Gmail se encripta antes de guardar
+- **Almacenamiento local**: Todo se guarda en tu archivo de configuración personal
+- **Clave única por usuario**: La encriptación usa el usuario de Windows como clave
+- **No se envía a internet**: Los datos de configuración nunca se sincronizar en la nube
+
+## 📧 Envío de Emails
+
+### Flujo de envío
+
+1. **Preparar Emails**:
+   - Configura asunto y cuerpo del email
+   - Personaliza con variables como `{nombre}`, `{apellido}`, etc.
+   - Se generan archivos de borrador automáticamente
+
+2. **Enviar Emails (Gmail)**:
+   - Requiere credenciales de Gmail
+   - Usa Gmail SMTP (smtp.gmail.com:465)
+   - Adjunta automáticamente los PDFs generados
+   - Muestra resumen de enviados y fallidos
+
+### Generador de contraseña de aplicación
+
+Para usar Gmail con seguridad sin exponer tu contraseña:
+
+1. Ve a https://myaccount.google.com/security
+2. Activa **Verificación en 2 pasos** (si no lo has hecho)
+3. Ve a https://myaccount.google.com/apppasswords
+4. Selecciona "Mail" y "Windows"
+5. Google te generará una contraseña de 16 caracteres
+6. Cópiala en el campo de la app sin espacios
+
+**Nota**: Esta contraseña es específica para esta app y puedes revocarla en cualquier momento.
 
 ## 🔧 Personalización
 
-### Modificar el cuerpo del email
-Edite el método `_generar_cuerpo_email` en `modulos/preparador_emails.py`:
+### Modificar plantilla de email predeterminada
+Edita en `app_consentimientos.py`, método `preparar_emails()`:
 
 ```python
-def _generar_cuerpo_email(self, nombre: str) -> str:
-    return f"""Su mensaje personalizado aquí...
-    
-Estimado/a {nombre},
-...
+texto_defecto = """Estimado/a {nombre},
+
+Tu mensaje personalizado aquí...
 """
 ```
 
-### Cambiar formato de nombres de archivo
-Edite el método `_generar_nombre_archivo` en `modulos/generador_word.py`
+### Cambiar configuración de Gmail
+En la ventana principal:
+1. Introduce el correo Gmail
+2. Introduce contraseña de aplicación
+3. (Opcional) Introduce nombre del remitente
+4. Click en **"💾 Guardar Configuración"**
 
 ## ⚠️ Solución de Problemas
+
+### Error: "Word no responde"
+**Solución**: Cierra Word manualmente o ejecuta:
+```powershell
+taskkill /F /IM WINWORD.EXE
+```
 
 ### Error: "Módulos no encontrados"
 **Solución**: Instalar dependencias
 ```bash
-pip install openpyxl python-docx
+pip install -r requirements.txt
 ```
 
 ### Error: "El archivo Excel no se puede leer"
@@ -367,20 +450,91 @@ pip install openpyxl python-docx
 - Asegurarse que los nombres coincidan con los encabezados del Excel
 - Revisar que no haya espacios dentro de los marcadores
 
-### No se encuentran los archivos de consentimiento al preparar emails
-**Solución**: Verificar que los archivos se hayan generado correctamente antes de preparar emails
+### Error de Gmail: "Credenciales inválidas"
+**Causa**: Contraseña incorrecta o cuenta no tiene 2FA habilitado
+**Solución**:
+1. Activar autenticación de dos factores en tu cuenta Google
+2. Generar una "Contraseña de aplicación" (ver sección "Envío de Emails")
+3. Usar la contraseña de aplicación (16 caracteres) en lugar de la contraseña normal
+4. Verificar que el email esté escrito correctamente (incluyendo @gmail.com)
+
+### Error: "PDF no encontrado"
+**Causa**: Los archivos de consentimiento generados no se encuentran en la carpeta
+**Soluciones**:
+1. Verificar que el paso "Generar Consentimientos" finalizó correctamente (revisar log)
+2. Revisar que el mapeo de campos sea correcto (especialmente nombres de alumno)
+3. Los PDFs deben estar en la misma carpeta del ejecutable o especificados en configuración
+4. Si cambiaste los nombres de columnas en Excel, actualizar el mapeo en el paso 2
+
+### Error: "timeout esperando response de Word"
+**Causa**: Word tardó demasiado en convertir el documento a PDF
+**Soluciones**:
+1. Cerrar otros programas para liberar memoria
+2. Intentar generar un consentimiento a la vez
+3. Reiniciar Word manualmente (cierra la aplicación y abre de nuevo)
 
 ## 📝 Notas Importantes
 
 - Los nombres de columnas en Excel no distinguen mayúsculas/minúsculas
 - Los consentimientos se sobrescriben si ya existe un archivo con el mismo nombre
-- Se recomienda revisar los borradores antes de enviar emails
+- **Se recomienda revisar los borradores en `emails_para_enviar.txt` antes de enviar emails**
 - Los archivos generados usan formato .docx (Word 2007+)
+- Las contraseñas se guardan **encriptadas** en `~/.sepas_config.json` (tu perfil de Windows)
+- **IMPORTANTE**: Usar "Contraseña de Aplicación" de Google, no la contraseña de tu cuenta personal
+
+## 📋 Historial de Cambios
+
+### v2.0.0 - Sistema de Envío de Emails por Gmail
+**Nuevas funcionalidades**:
+- ✅ Envío de emails automático a través de Gmail SMTP
+- ✅ Configuración persistente de credenciales de Gmail (encriptadas)
+- ✅ Personalización de asunto y cuerpo del email
+- ✅ Generación de borradores de email para revisión antes de enviar
+- ✅ Búsqueda inteligente de archivos PDF (flexible con nombres de campos)
+- ✅ Interfaz mejorada con scroll vertical en log de actividades
+
+**Cambios técnicos**:
+- Agregado: Encriptación Fernet para almacenamiento seguro de contraseñas
+- Agregado: SMTP Gmail con autenticación SSL
+- Mejorado: PDF search para adaptarse a diferentes esquemas de nombres
+- Mejorado: Interfaz basada en Canvas para mejor UX
+
+### v1.0.0 - Generador de Consentimientos SEPA
+**Funcionalidades bases**:
+- Lectura de datos desde Excel
+- Mapeo de campos con plantilla Word
+- Generación de consentimientos en PDF
+- Búsqueda y sustitución de marcadores
+
+## 🔒 Seguridad de Credenciales
+
+### ¿Cómo se protegen mis contraseñas?
+- Las contraseñas de Gmail se **encriptan localmente** usando el algoritmo Fernet (cryptography)
+- La clave de encriptación se basa en tu nombre de usuario de Windows (SHA-256)
+- Las contraseñas se almacenan encriptadas en `~/.sepas_config.json`
+- **Nunca** se envían a servidores externos; todo es local
+
+### ¿Qué pasa si alguien accede a mi archivo `.sepas_config.json`?
+- Las contraseñas están encriptadas y vinculadas a tu usuario de Windows
+- Si alguien intenta desencriptarlas desde otra cuenta, fallará
+- Se recomienda: Mantener acceso controlado a tu computadora
+
+### ¿Puedo cambiar mi contraseña de Gmail después?
+- Sí, simplemente:
+  1. Abre la aplicación
+  2. En la sección "📧 Envío de Emails", introduce la nueva contraseña de aplicación
+  3. Click en **"💾 Guardar Configuración"**
+  4. La nueva contraseña se encriptará y guardará automáticamente
 
 ## 🤝 Soporte
 
 Para problemas o preguntas, contacte al administrador del sistema.
 
-## 📄 Licencia
+## 📄 Licencia y Términos
 
 Este software es propiedad de SEPAS. Todos los derechos reservados.
+
+**Términos de uso**:
+- Solo para uso autorizado dentro de la organización SEPAS
+- No reproducir, distribuir o modificar sin autorización
+- Las contraseñas almacenadas son responsabilidad del usuario
