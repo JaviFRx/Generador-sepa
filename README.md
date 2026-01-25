@@ -532,9 +532,9 @@ Para problemas o preguntas, contacte al administrador del sistema.
 
 ## 📄 Licencia y Términos
 
-Este software es propiedad de SEPAS. Todos los derechos reservados.
+Repositorio personal de Javier Fernández Ramos. No reclamo propiedad sobre el software original de SEPAS; los derechos corresponden a sus titulares.
 
 **Términos de uso**:
-- Solo para uso autorizado dentro de la organización SEPAS
-- No reproducir, distribuir o modificar sin autorización
+- Uso interno y autorizado únicamente por SEPAS y las partes que cuenten con permiso
+- No reproducir, distribuir o modificar sin autorización de los titulares
 - Las contraseñas almacenadas son responsabilidad del usuario

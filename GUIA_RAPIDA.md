@@ -161,4 +161,4 @@ Para preguntas o problemas, contacta al administrador del sistema.
 
 ---
 
-**SEPAS © 2026**
+Repositorio personal de Javier Fernández Ramos. Derechos del software pertenecen a SEPAS.
