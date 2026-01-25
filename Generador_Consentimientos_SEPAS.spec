@@ -5,7 +5,7 @@ a = Analysis(
     ['app_consentimientos.py'],
     pathex=[],
     binaries=[],
-    datas=[],
+    datas=[('modulos', 'modulos')],
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},
@@ -35,5 +35,4 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon='NONE',
 )

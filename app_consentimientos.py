@@ -586,7 +586,7 @@ class AplicacionConsentimientos:
         titulo.pack(pady=(0, 20))
         
         instruccion = tk.Label(frame,
-                             text="Esta configuración se guardará y se usará siempre que envíes emails.",
+                             text="Esta configuración se guardará y se usará para generar los borradores.",
                              font=('Arial', 10),
                              bg='#f5f5f5', fg='#555')
         instruccion.pack(pady=(0, 15))
@@ -637,7 +637,7 @@ Gfg Kids"""
         btn_frame = tk.Frame(frame, bg='#f5f5f5')
         btn_frame.pack(fill=tk.X, pady=10)
         
-        def guardar_config_email():
+        def generar_borradores_emails():
             asunto = entry_asunto.get().strip()
             cuerpo = text_cuerpo.get(1.0, tk.END).strip()
             
@@ -653,17 +653,50 @@ Gfg Kids"""
             self._guardar_config()
             
             ventana_config.destroy()
-            messagebox.showinfo("Configuración guardada", 
-                              "Los datos se guardarán y se usarán para futuros envíos.")
+            
+            # Generar borradores automáticamente
+            carpeta_salida = Path(self.carpeta_salida.get())
+            
+            if not carpeta_salida.exists():
+                messagebox.showerror("Error", "No hay consentimientos generados")
+                return
+            
+            try:
+                from modulos.preparador_emails import PreparadorEmails
+                
+                self.agregar_log("=" * 80)
+                self.agregar_log("Preparando borradores de emails...")
+                
+                preparador = PreparadorEmails(str(carpeta_salida))
+                resultado = preparador.crear_borradores_email(
+                    self.archivo_excel.get(),
+                    asunto_base=asunto,
+                    cuerpo_personalizado=cuerpo
+                )
+                
+                self.agregar_log(f"✓ Se prepararon {len(resultado)} borradores de email")
+                self.agregar_log(f"✓ Archivo 'emails_para_enviar.txt' generado")
+                self.agregar_log(f"✓ Archivo 'emails_lista.csv' generado")
+                
+                messagebox.showinfo("Completado", 
+                                  f"Se prepararon {len(resultado)} borradores\n"
+                                  "Revise los archivos en la carpeta de salida")
+                
+            except ImportError:
+                self.agregar_log("✗ Error: Módulo preparador_emails no encontrado")
+                messagebox.showerror("Error", "Módulo preparador_emails no encontrado")
+            except Exception as e:
+                self.agregar_log(f"✗ Error: {str(e)}")
+                messagebox.showerror("Error", f"Error al preparar emails:\n{str(e)}")
         
-        btn_guardar = tk.Button(btn_frame, text="💾 Guardar Configuración",
-                              command=guardar_config_email,
+        btn_generar = tk.Button(btn_frame, text="✓ Guardar y Generar Borradores",
+                              command=generar_borradores_emails,
                               font=('Arial', 12, 'bold'),
                               bg='#4CAF50', fg='white',
                               activebackground='#45a049',
                               cursor='hand2', relief=tk.RAISED, bd=3,
                               padx=30, pady=10)
-        btn_guardar.pack(side=tk.LEFT, padx=10)
+        btn_generar.pack(side=tk.LEFT, padx=10)
         
         btn_cancelar = tk.Button(btn_frame, text="✗ Cancelar",
                                command=ventana_config.destroy,

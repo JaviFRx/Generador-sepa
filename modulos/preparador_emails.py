@@ -235,30 +235,27 @@ class PreparadorEmails:
         Returns:
             Ruta del archivo o None
         """
-        # Buscar DNI o identificador
-        dni = None
-        nombre = None
-        apellido = None
+        # Si no hay archivos, retornar None
+        if not archivos:
+            return None
         
-        for clave, valor in registro.items():
-            clave_lower = clave.lower()
-            if 'dni' in clave_lower or 'documento' in clave_lower:
-                dni = valor
-            elif 'nombre' in clave_lower and 'apellido' not in clave_lower:
-                nombre = valor
-            elif 'apellido' in clave_lower:
-                apellido = valor
+        # Si solo hay un archivo, retornarlo (asumiendo que es el único)
+        if len(archivos) == 1:
+            return str(archivos[0])
         
-        # Buscar archivo que contenga el DNI, apellido o nombre
+        # Buscar por valores de cualquier campo en el nombre del archivo
         for archivo in archivos:
             nombre_archivo = archivo.stem.lower()
             
-            if dni and dni.lower() in nombre_archivo:
-                return str(archivo)
-            if apellido and apellido.lower() in nombre_archivo:
-                return str(archivo)
-            if nombre and nombre.lower() in nombre_archivo:
-                return str(archivo)
+            # Buscar cualquier valor del registro en el nombre del archivo
+            for clave, valor in registro.items():
+                if valor and str(valor).lower() in nombre_archivo:
+                    return str(archivo)
+        
+        # Si no encuentra por coincidencia exacta, retornar el primer archivo
+        # (como fallback cuando solo hay uno)
+        if len(archivos) == 1:
+            return str(archivos[0])
         
         return None
     
