@@ -67,6 +67,7 @@ D:/Sepas/.venv/Scripts/pyinstaller.exe --clean build_exe.spec
 
 O usa el script:
 ```cmd
+## 📝 Notas Importantes
 crear_ejecutable.bat
 ```
 
