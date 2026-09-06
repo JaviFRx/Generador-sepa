@@ -5,7 +5,7 @@ a = Analysis(
     ['app_consentimientos.py'],
     pathex=[],
     binaries=[],
-    datas=[('modulos', 'modulos')],
+    datas=[('modulos', 'modulos'), ('docs', 'docs')],
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},

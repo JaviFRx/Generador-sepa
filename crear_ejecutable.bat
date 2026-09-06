@@ -12,7 +12,7 @@ echo Compilando aplicacion...
 echo Esto puede tardar 1-2 minutos...
 echo.
 
-pyinstaller --onefile --windowed --name="Generador_Consentimientos_SEPAS" --add-data "modulos;modulos" app_consentimientos.py
+pyinstaller --onefile --windowed --name="Generador_Consentimientos_SEPAS" --add-data "modulos;modulos" --add-data "docs;docs" app_consentimientos.py
 
 echo.
 echo ========================================

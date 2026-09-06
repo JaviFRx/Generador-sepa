@@ -7,6 +7,8 @@ y prepararlos para envío por correo electrónico.
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox, scrolledtext
 import os
+import sys
+import shutil
 from pathlib import Path
 from datetime import datetime
 import urllib.request
@@ -15,6 +17,45 @@ import urllib.parse
 import base64
 import hashlib
 from cryptography.fernet import Fernet
+
+
+def ruta_base_app() -> Path:
+    """Carpeta donde vive la aplicacion: junto al .exe o junto al .py"""
+    if getattr(sys, 'frozen', False):
+        return Path(sys.executable).parent
+    return Path(__file__).parent
+
+
+def ruta_recursos() -> Path:
+    """Carpeta de recursos empaquetados (_MEIPASS dentro del .exe)"""
+    if getattr(sys, 'frozen', False):
+        return Path(getattr(sys, '_MEIPASS', Path(sys.executable).parent))
+    return Path(__file__).parent
+
+
+def buscar_plantilla_default() -> Path:
+    """Plantilla del programa en una ruta estable, nunca dentro de la carpeta temporal del .exe"""
+    junto_al_exe = ruta_base_app() / "docs" / "plantilla_domiciliacion_sepa.docx"
+    if junto_al_exe.exists():
+        return junto_al_exe
+
+    empaquetada = ruta_recursos() / "docs" / "plantilla_domiciliacion_sepa.docx"
+    if empaquetada.exists():
+        # _MEIxxxx se borra al cerrar el programa: copiarla a una carpeta permanente
+        destinos = [
+            junto_al_exe,
+            Path.home() / "SEPAS" / "docs" / "plantilla_domiciliacion_sepa.docx",
+        ]
+        for destino in destinos:
+            try:
+                destino.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(empaquetada, destino)
+                return destino
+            except OSError:
+                continue
+        return empaquetada
+
+    return junto_al_exe
 
 
 class AplicacionConsentimientos:
@@ -34,11 +75,18 @@ class AplicacionConsentimientos:
         
         # Variables
         self.archivo_excel = tk.StringVar()
-        # Buscar plantilla en carpeta docs del software
-        ruta_software = Path(__file__).parent
-        ruta_plantilla_default = ruta_software / "docs" / "plantilla_domiciliacion_sepa.docx"
+        # Plantilla: la guardada en configuracion si sigue existiendo, si no la del programa
+        plantilla_guardada = self.config.get("plantilla_word", "")
+        if "_MEI" in plantilla_guardada:
+            plantilla_guardada = ""
+        if plantilla_guardada and Path(plantilla_guardada).exists():
+            ruta_plantilla_default = Path(plantilla_guardada)
+        else:
+            ruta_plantilla_default = buscar_plantilla_default()
         self.plantilla_word = tk.StringVar(value=str(ruta_plantilla_default))
-        self.carpeta_salida = tk.StringVar(value=str(Path.cwd() / "consentimientos_generados"))
+        carpeta_guardada = self.config.get("carpeta_salida", "")
+        self.carpeta_salida = tk.StringVar(
+            value=carpeta_guardada or str(Path.cwd() / "consentimientos_generados"))
         self.gmail_usuario = tk.StringVar(value=self.config.get("gmail_usuario", ""))
         self.gmail_app_password = tk.StringVar(value=self.config.get("gmail_app_password", ""))
         self.gmail_nombre_remitente = tk.StringVar(value=self.config.get("gmail_nombre_remitente", ""))
@@ -272,9 +320,15 @@ class AplicacionConsentimientos:
             
     def seleccionar_plantilla(self):
         """Abre diálogo para seleccionar plantilla Word"""
-        # Abrir diálogo en la carpeta docs del programa
-        carpeta_docs = Path(__file__).parent / "docs"
-        carpeta_inicial = str(carpeta_docs) if carpeta_docs.exists() else str(Path.cwd())
+        # Abrir diálogo en la carpeta de la plantilla actual, o en docs del programa
+        actual = Path(self.plantilla_word.get())
+        carpeta_docs = ruta_base_app() / "docs"
+        if actual.exists():
+            carpeta_inicial = str(actual.parent)
+        elif carpeta_docs.exists():
+            carpeta_inicial = str(carpeta_docs)
+        else:
+            carpeta_inicial = str(Path.cwd())
         
         archivo = filedialog.askopenfilename(
             title="Seleccionar plantilla Word",
@@ -284,6 +338,7 @@ class AplicacionConsentimientos:
         if archivo:
             self.plantilla_word.set(archivo)
             self.agregar_log(f"✓ Plantilla seleccionada: {Path(archivo).name}")
+            self._guardar_config()
             
     def seleccionar_carpeta(self):
         """Abre diálogo para seleccionar carpeta de salida"""
@@ -291,6 +346,7 @@ class AplicacionConsentimientos:
         if carpeta:
             self.carpeta_salida.set(carpeta)
             self.agregar_log(f"✓ Carpeta de salida: {carpeta}")
+            self._guardar_config()
             
     def agregar_log(self, mensaje):
         """Agrega un mensaje al área de log"""
@@ -358,6 +414,8 @@ class AplicacionConsentimientos:
                 "gmail_nombre_remitente": self.gmail_nombre_remitente.get(),
                 "email_asunto": self.email_asunto.get(),
                 "email_cuerpo": self.email_cuerpo,
+                "plantilla_word": self.plantilla_word.get(),
+                "carpeta_salida": self.carpeta_salida.get(),
             }
             with open(self.ruta_config, 'w', encoding='utf-8') as f:
                 json.dump(config, f, ensure_ascii=False, indent=2)
