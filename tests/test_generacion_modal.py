@@ -160,53 +160,37 @@ class GeneracionModalTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Borradores bloqueados"):
             RegistroConsentimientos(self.carpeta).validar([])
 
-    def test_crear_borradores_se_ejecuta_en_segundo_plano_y_cierra_modal(self):
+    def test_preparacion_de_correos_responde_en_segundo_plano(self):
         self.app.gmail_usuario.set("prueba@example.test")
         self.app.gmail_app_password.set("clave-ficticia")
-        self.assertFalse(hasattr(self.app, "enviar_emails_gmail"))
         hilos = []
-
-        def crear(**configuracion):
+        def preparar(config, progreso):
             hilos.append(threading.get_ident())
-            configuracion["progreso"](1, 2, 1, 0)
+            progreso(1, 2)
             self.iniciados[0].set()
             self.liberar[0].wait(timeout=5)
-            return {"total": 2, "creados": 2, "existentes": 0, "fallidos": [], "pendientes": 0}
-
-        with patch.object(self.app, "_guardar_config"), \
-                patch("modulos.preparador_emails.PreparadorEmails.crear_borradores_gmail", side_effect=crear) as servicio:
-            self.app.crear_borradores_gmail()
+            return {"cuenta": "prueba@example.test", "mensajes": [], "omitidos": 2}
+        with patch("modulos.envio_correos.EnviadorCorreos.preparar_envio", side_effect=preparar) as servicio:
+            self.app.enviar_correos_gmail()
             modal = self.app.ventana_progreso
-            self.assertEqual(modal.title(), "Creando borradores en Gmail")
             self.esperar(self.iniciados[0].is_set)
             self.esperar(lambda: float(self.app.barra_progreso["value"]) == 50)
             self.assertNotEqual(hilos[0], threading.get_ident())
-            self.app.crear_borradores_gmail()
+            self.app.enviar_correos_gmail()
             servicio.assert_called_once()
             self.liberar[0].set()
             self.esperar(lambda: not self.app._generando)
         self.assertFalse(modal.winfo_exists())
-        self.assertEqual(str(self.app.btn_borradores["state"]), "normal")
-        self.assertIn("El programa no ha enviado", self.avisos.showinfo.call_args.args[1])
+        self.assertEqual(str(self.app.btn_enviar["state"]), "normal")
+        self.assertIn("ENVIAR", str(self.app.btn_enviar["text"]))
+        self.assertFalse(hasattr(self.app, "btn_enviar_borradores"))
 
-    def test_error_de_gmail_libera_la_modal(self):
-        self.app.gmail_usuario.set("prueba@example.test")
-        self.app.gmail_app_password.set("clave-ficticia")
-        with patch.object(self.app, "_guardar_config"), \
-                patch("modulos.preparador_emails.PreparadorEmails.crear_borradores_gmail",
-                      side_effect=RuntimeError("No se pudo conectar con Gmail")):
-            self.app.crear_borradores_gmail()
-            self.esperar(lambda: not self.app._generando)
-        self.assertIsNone(self.app.ventana_progreso)
-        self.assertEqual(str(self.app.btn_borradores["state"]), "normal")
-        self.avisos.showerror.assert_called_once()
-
-    def test_envio_requiere_confirmar_la_lista_de_borradores(self):
+    def test_envio_requiere_confirmar_destinatarios_y_pdfs(self):
         self.app.gmail_usuario.set("prueba@example.test")
         self.app.gmail_app_password.set("clave-ficticia")
         plan = {"cuenta": "prueba@example.test", "omitidos": 0,
-                "mensajes": [{"email": "ana@example.test", "asunto": "Texto de Gmail", "archivo": "ana.pdf"}]}
-        resultado = {"enviados": 1, "omitidos": 0, "pendientes": 0, "errores": [], "avisos": []}
+                "mensajes": [{"email": "ana@example.test", "asunto": "Texto configurado", "archivo": "ana.pdf"}]}
+        resultado = {"enviados": 1, "verificados": 1, "omitidos": 0, "pendientes": 0, "errores": [], "avisos": []}
 
         def botones(widget):
             encontrados = []
@@ -218,18 +202,18 @@ class GeneracionModalTest(unittest.TestCase):
 
         def confirmacion_visible():
             ventana = self.app.ventana_progreso
-            return ventana is not None and ventana.title() == "Confirmar envío de borradores revisados"
+            return ventana is not None and ventana.title() == "Confirmar envío de correos"
 
-        with patch("modulos.envio_borradores.EnviadorBorradores.preparar_envio", return_value=plan), \
-                patch("modulos.envio_borradores.EnviadorBorradores.enviar", return_value=resultado) as enviar:
-            self.app.enviar_borradores_gmail()
+        with patch("modulos.envio_correos.EnviadorCorreos.preparar_envio", return_value=plan), \
+                patch("modulos.envio_correos.EnviadorCorreos.enviar", return_value=resultado) as enviar:
+            self.app.enviar_correos_gmail()
             self.esperar(confirmacion_visible)
             enviar.assert_not_called()
             cancelar = next(b for b in botones(self.app.ventana_progreso) if b["text"] == "Cancelar")
             cancelar.invoke()
             self.assertFalse(self.app._generando)
             enviar.assert_not_called()
-            self.app.enviar_borradores_gmail()
+            self.app.enviar_correos_gmail()
             self.esperar(confirmacion_visible)
             enviar.assert_not_called()
             confirmar = next(b for b in botones(self.app.ventana_progreso) if str(b["text"]).startswith("Enviar los"))
@@ -238,14 +222,14 @@ class GeneracionModalTest(unittest.TestCase):
             enviar.assert_called_once()
             self.assertIs(enviar.call_args.args[0], plan)
         self.assertIsNone(self.app.ventana_progreso)
-        self.assertIn("Enviados: 1", self.avisos.showinfo.call_args.args[1])
+        self.assertIn("Comprobados en Enviados: 1", self.avisos.showinfo.call_args.args[1])
 
     def test_fallo_en_verificacion_no_muestra_confirmacion_ni_envia(self):
         self.app.gmail_usuario.set("prueba@example.test")
         self.app.gmail_app_password.set("clave-ficticia")
-        with patch("modulos.envio_borradores.EnviadorBorradores.preparar_envio", side_effect=ValueError("PDF incorrecto")), \
-                patch("modulos.envio_borradores.EnviadorBorradores.enviar") as enviar:
-            self.app.enviar_borradores_gmail()
+        with patch("modulos.envio_correos.EnviadorCorreos.preparar_envio", side_effect=ValueError("PDF incorrecto")), \
+                patch("modulos.envio_correos.EnviadorCorreos.enviar") as enviar:
+            self.app.enviar_correos_gmail()
             self.esperar(lambda: not self.app._generando)
             enviar.assert_not_called()
         self.assertIsNone(self.app.ventana_progreso)

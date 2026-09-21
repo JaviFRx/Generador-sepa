@@ -233,7 +233,7 @@ class AplicacionConsentimientos:
         btn_carpeta.pack(side=tk.LEFT)
 
         # Sección 4: Cuenta Gmail para envío
-        tk.Label(main_frame, text="➍ Cuenta Gmail para crear borradores:", 
+        tk.Label(main_frame, text="➍ Cuenta Gmail para enviar correos:", 
                  font=fuente_seccion, bg='#f5f5f5', fg='#333').pack(anchor=tk.W, pady=(20, 5))
 
         gmail_frame = tk.Frame(main_frame, bg='#f5f5f5')
@@ -257,7 +257,7 @@ class AplicacionConsentimientos:
 
         tk.Label(
             gmail_frame,
-            text="Crea los borradores, revísalos en Gmail y vuelve aquí para enviarlos cuando estén correctos.",
+            text="Comprueba destinatarios y PDFs, confirma el envío y consulta el resultado en Enviados.",
             font=('Arial', 9),
             bg='#f5f5f5',
             fg='#666'
@@ -301,14 +301,14 @@ class AplicacionConsentimientos:
                               padx=30, pady=20, width=20, height=4)
         btn_emails.pack(side=tk.LEFT, padx=10)
 
-        self.btn_borradores = tk.Button(btn_frame, text="📝 CREAR\nBORRADORES\n(Gmail)", 
-                      command=self.crear_borradores_gmail,
+        self.btn_enviar = tk.Button(btn_frame, text="📤 ENVIAR\nCORREOS\n(Gmail)", 
+                      command=self.enviar_correos_gmail,
                       font=fuente_boton,
                       bg='#1976D2', fg='white',
                       activebackground='#1565C0',
                       cursor='hand2', relief=tk.RAISED, bd=4,
                       padx=30, pady=20, width=20, height=4)
-        self.btn_borradores.pack(side=tk.LEFT, padx=10)
+        self.btn_enviar.pack(side=tk.LEFT, padx=10)
         
         # Botón para abrir carpeta
         btn_abrir_carpeta = tk.Button(btn_frame, text="📁 ABRIR\nCARPETA\nDE PDFs", 
@@ -320,13 +320,7 @@ class AplicacionConsentimientos:
                               padx=30, pady=20, width=20, height=4)
         btn_abrir_carpeta.pack(side=tk.LEFT, padx=10)
 
-        self.btn_enviar_borradores = tk.Button(
-            main_frame, text="📤 ENVIAR BORRADORES REVISADOS (Gmail)",
-            command=self.enviar_borradores_gmail, font=fuente_boton,
-            bg='#D32F2F', fg='white', activebackground='#B71C1C',
-            cursor='hand2', padx=20, pady=12,
-        )
-        self.btn_enviar_borradores.pack(pady=(0, 15))
+
         
         # Separador
         ttk.Separator(main_frame, orient='horizontal').pack(fill=tk.X, pady=10)
@@ -568,10 +562,7 @@ class AplicacionConsentimientos:
             self.ventana_progreso.destroy()
             self.ventana_progreso = None
         self.btn_generar.configure(state=tk.NORMAL)
-        if hasattr(self, "btn_borradores"):
-            self.btn_borradores.configure(state=tk.NORMAL)
-        if hasattr(self, "btn_enviar_borradores"):
-            self.btn_enviar_borradores.configure(state=tk.NORMAL)
+        self.btn_enviar.configure(state=tk.NORMAL)
 
     def _procesar_eventos_generacion(self):
         """Tk consume los eventos en su propio hilo y mantiene activo el reloj."""
@@ -750,9 +741,9 @@ class AplicacionConsentimientos:
                 avisar("error", "Error", "No hay datos en el Excel")
                 return
 
-            progreso(estado="Eliminando PDFs y borradores anteriores…")
+            progreso(estado="Eliminando PDFs y listas de correo anteriores…")
             eliminados = registro_pdfs.iniciar(datos, limpiar_anteriores=True)
-            log(f"✓ Eliminados {eliminados} archivos del lote anterior (PDFs y borradores)")
+            log(f"✓ Eliminados {eliminados} archivos del lote anterior (PDFs y listas de correo)")
             
             # Aplicar mapeo a los datos
             log(f"Aplicando mapeo de campos: {len(mapeo_campos)} campos")
@@ -867,7 +858,7 @@ class AplicacionConsentimientos:
             
             registro_pdfs.finalizar()
             if errores:
-                log("✗ Borradores bloqueados: vuelve a generar el lote completo sin errores.")
+                log("✗ Envío bloqueado: vuelve a generar el lote completo sin errores.")
 
             # Limpieza final de Word
             progreso(estado="Finalizando generación…")
@@ -884,7 +875,7 @@ class AplicacionConsentimientos:
                 log(f"ADVERTENCIA: {errores} registros con errores")
 
             progreso(
-                estado=(f"Finalizado con {errores} errores. La creación de borradores está bloqueada."
+                estado=(f"Finalizado con {errores} errores. El envío está bloqueado."
                         if errores else "Todos los PDFs se han generado correctamente"),
                 terminado=True,
             )
@@ -934,7 +925,7 @@ class AplicacionConsentimientos:
         titulo.pack(pady=(0, 20))
         
         instruccion = tk.Label(frame,
-                             text="Configura el texto y revisa la lista de adjuntos antes de crear los borradores en Gmail.",
+                             text="Configura el texto y revisa la lista de destinatarios y PDFs antes de enviar.",
                              font=('Arial', 10),
                              bg='#f5f5f5', fg='#555')
         instruccion.pack(pady=(0, 15))
@@ -1028,7 +1019,7 @@ Gfg Kids"""
                 
                 messagebox.showinfo("Completado", 
                                   f"Se prepararon {len(resultado)} correos para revisión\n"
-                                  "Revisa la lista y pulsa Crear borradores (Gmail)")
+                                  "Revisa la lista y pulsa Enviar correos (Gmail)")
                 
             except ImportError:
                 self.agregar_log("✗ Error: Módulo preparador_emails no encontrado")
@@ -1055,109 +1046,7 @@ Gfg Kids"""
                                padx=30, pady=10)
         btn_cancelar.pack(side=tk.LEFT, padx=10)
 
-    def crear_borradores_gmail(self):
-        """Crea borradores revisables en Gmail, sin posibilidad de envío directo."""
-        if self._generando:
-            return
-        usuario = self.gmail_usuario.get().strip()
-        clave = self.gmail_app_password.get().strip()
-        if not usuario or not clave:
-            messagebox.showwarning("Datos incompletos", "Indica la cuenta Gmail y su contraseña de aplicación.")
-            return
-        if not self.archivo_excel.get() or not Path(self.carpeta_salida.get()).exists():
-            messagebox.showerror("Faltan datos", "Selecciona el Excel y genera primero los PDFs.")
-            return
-        self._guardar_config()
-        configuracion = {
-            "ruta_excel": self.archivo_excel.get(), "gmail_usuario": usuario,
-            "gmail_app_password": clave,
-            "nombre_remitente": self.gmail_nombre_remitente.get().strip() or None,
-            "asunto_base": self.email_asunto.get(), "cuerpo_personalizado": self.email_cuerpo,
-        }
-        carpeta = self.carpeta_salida.get()
-        self._crear_modal_progreso_pdf(titulo="Creando borradores en Gmail")
-        self._generando = True
-        self.btn_generar.configure(state=tk.DISABLED)
-        self.btn_borradores.configure(state=tk.DISABLED)
-        self.progreso_estado.set("Verificando destinatarios y PDFs…")
-        self.progreso_detalle.set("Los mensajes se guardarán en Borradores de Gmail para que los revises.")
-        self.progreso_tiempo.set("Transcurrido: 0 s")
-        self.barra_progreso.configure(mode="indeterminate")
-        self.barra_progreso.start(15)
-        self._inicio_borradores = monotonic()
-        self._eventos_borradores = Queue()
-        self._resultado_borradores = None
-        self._error_borradores = None
-        self._hilo_borradores = Thread(
-            target=self._crear_borradores_trabajo,
-            args=(carpeta, configuracion, self._eventos_borradores), daemon=True,
-        )
-        try:
-            self._hilo_borradores.start()
-        except Exception as exc:
-            self._cerrar_modal_progreso_pdf()
-            messagebox.showerror("Error", f"No se pudo iniciar la creación de borradores: {exc}")
-            return
-        self.root.after(100, self._procesar_eventos_borradores)
-
-    @staticmethod
-    def _crear_borradores_trabajo(carpeta, configuracion, eventos):
-        try:
-            from modulos.preparador_emails import PreparadorEmails
-            resultado = PreparadorEmails(carpeta).crear_borradores_gmail(
-                **configuracion,
-                progreso=lambda *datos: eventos.put(("progreso", datos)),
-            )
-            eventos.put(("resultado", resultado))
-        except Exception as exc:
-            eventos.put(("error", str(exc)))
-        finally:
-            eventos.put(("fin", None))
-
-    def _procesar_eventos_borradores(self):
-        if not self._generando:
-            return
-        for _ in range(100):
-            try:
-                tipo, datos = self._eventos_borradores.get_nowait()
-            except Empty:
-                break
-            if tipo == "progreso":
-                procesados, total, creados, existentes = datos
-                self.barra_progreso.stop()
-                self.barra_progreso.configure(mode="determinate", value=100 * procesados / total if total else 0)
-                self.progreso_estado.set("Conectando con Gmail…" if not procesados else "Guardando borradores en Gmail…")
-                self.progreso_detalle.set(
-                    f"{procesados} de {total} revisados · {creados} creados · "
-                    f"{existentes} ya existentes · {total - procesados} pendientes"
-                )
-            elif tipo == "resultado":
-                self._resultado_borradores = datos
-            elif tipo == "error":
-                self._error_borradores = datos
-            elif tipo == "fin":
-                self._cerrar_modal_progreso_pdf()
-                if self._error_borradores:
-                    self.agregar_log(f"✗ Error al crear borradores: {self._error_borradores}")
-                    messagebox.showerror("Error al crear borradores", self._error_borradores, parent=self.root)
-                else:
-                    resultado = self._resultado_borradores
-                    resumen = (f"Creados: {resultado['creados']}\n"
-                               f"Ya existentes en Borradores: {resultado['existentes']}\n"
-                               f"Sin confirmar: {len(resultado['fallidos'])}\n"
-                               f"Pendientes: {resultado['pendientes']}")
-                    self.agregar_log(resumen.replace("\n", " · "))
-                    for fallo in resultado["fallidos"]:
-                        self.agregar_log(f"  #{fallo['numero']} {fallo['email']}: {fallo['motivo']}")
-                    aviso = messagebox.showwarning if resultado["fallidos"] else messagebox.showinfo
-                    aviso("Borradores en Gmail", resumen + "\n\nAbre Gmail → Borradores. "
-                          "Comprueba cada destinatario y PDF; después vuelve a la app y pulsa "
-                          "Enviar borradores revisados.\nEl programa no ha enviado ningún correo.", parent=self.root)
-                return
-        self.progreso_tiempo.set(f"Transcurrido: {self._formatear_duracion(monotonic() - self._inicio_borradores)}")
-        self.root.after(100, self._procesar_eventos_borradores)
-
-    def enviar_borradores_gmail(self):
+    def enviar_correos_gmail(self):
         if self._generando:
             return
         usuario = self.gmail_usuario.get().strip()
@@ -1174,13 +1063,13 @@ Gfg Kids"""
 
     def _iniciar_operacion_envio(self, carpeta, configuracion, plan=None):
         self._crear_modal_progreso_pdf(
-            titulo="Comprobando borradores en Gmail" if plan is None else "Enviando borradores revisados"
+            titulo="Comprobando destinatarios y PDFs" if plan is None else "Enviando correos"
         )
         self._generando = True
-        for boton in (self.btn_generar, self.btn_borradores, self.btn_enviar_borradores):
+        for boton in (self.btn_generar, self.btn_enviar):
             boton.configure(state=tk.DISABLED)
-        self.progreso_estado.set("Leyendo y verificando los borradores…" if plan is None else "Verificando de nuevo antes de enviar…")
-        self.progreso_detalle.set("Solo se procesan los borradores correspondientes al lote actual.")
+        self.progreso_estado.set("Verificando destinatarios y PDFs…" if plan is None else "Verificando de nuevo antes de enviar…")
+        self.progreso_detalle.set("Se enviará cada correo con su PDF verificado y se comprobará su copia en Enviados.")
         self.progreso_tiempo.set("Transcurrido: 0 s")
         self.barra_progreso.configure(mode="indeterminate")
         self.barra_progreso.start(15)
@@ -1202,8 +1091,8 @@ Gfg Kids"""
     @staticmethod
     def _trabajo_envio(carpeta, configuracion, plan, eventos):
         try:
-            from modulos.envio_borradores import EnviadorBorradores
-            servicio = EnviadorBorradores(carpeta)
+            from modulos.envio_correos import EnviadorCorreos
+            servicio = EnviadorCorreos(carpeta)
             progreso = lambda *datos: eventos.put(("progreso", datos))
             resultado = (servicio.preparar_envio(configuracion, progreso) if plan is None
                          else servicio.enviar(plan, configuracion, progreso))
@@ -1226,7 +1115,7 @@ Gfg Kids"""
                 actual, total = datos
                 self.barra_progreso.stop()
                 self.barra_progreso.configure(mode="determinate", value=100 * actual / total if total else 0)
-                self.progreso_estado.set("Comprobando borradores…" if es_revision else "Enviando borradores revisados…")
+                self.progreso_estado.set("Comprobando destinatarios y PDFs…" if es_revision else "Enviando y comprobando en Gmail…")
                 self.progreso_detalle.set(f"{actual} de {total} procesados")
             elif tipo == "resultado":
                 self._resultado_envio = datos
@@ -1235,14 +1124,18 @@ Gfg Kids"""
             elif tipo == "fin":
                 self._cerrar_modal_progreso_pdf()
                 if self._error_envio:
-                    self.agregar_log(f"✗ Borradores: {self._error_envio}")
+                    self.agregar_log(f"✗ Envío: {self._error_envio}")
                     messagebox.showerror("No se pudo completar la operación", self._error_envio, parent=self.root)
                 elif es_revision:
-                    self._mostrar_confirmacion_borradores(self._resultado_envio, carpeta, configuracion)
+                    self._mostrar_confirmacion_envio(self._resultado_envio, carpeta, configuracion)
                 else:
                     r = self._resultado_envio
-                    texto = (f"Enviados: {r['enviados']}\nYa enviados anteriormente: {r['omitidos']}\n"
-                             f"Pendientes: {r['pendientes']}")
+                    texto = (f"Aceptados por Gmail: {r['enviados']}\n"
+                             f"Comprobados en Enviados: {r['verificados']}\n"
+                             f"Ya enviados anteriormente: {r['omitidos']}\n"
+                             f"Pendientes de enviar: {r['pendientes']}\n\n"
+                             "Consulta informe_envios.csv en la carpeta de PDFs.\n"
+                             "La comprobación en Enviados no acredita la entrega al destinatario.")
                     detalles = r["errores"] + r["avisos"]
                     if detalles:
                         texto += "\n\n" + "\n".join(detalles)
@@ -1253,32 +1146,57 @@ Gfg Kids"""
         self.progreso_tiempo.set(f"Transcurrido: {self._formatear_duracion(monotonic() - self._inicio_envio)}")
         self.root.after(100, self._procesar_eventos_envio)
 
-    def _mostrar_confirmacion_borradores(self, plan, carpeta, configuracion):
+    def _mostrar_confirmacion_envio(self, plan, carpeta, configuracion):
         if not plan["mensajes"]:
             messagebox.showinfo("Sin envíos pendientes", "Los correos de este lote ya constan como enviados.", parent=self.root)
             return
         ventana = tk.Toplevel(self.root)
         self.ventana_progreso = ventana
         self._generando = True
-        ventana.title("Confirmar envío de borradores revisados")
+        ventana.title("Confirmar envío de correos")
         ventana.geometry("900x480")
         ventana.transient(self.root)
         ventana.grab_set()
         marco = ttk.Frame(ventana, padding=18)
         marco.pack(fill=tk.BOTH, expand=True)
-        ttk.Label(marco, text=f"Se enviarán {len(plan['mensajes'])} borradores desde {plan['cuenta']}.",
+        ttk.Label(marco, text=f"Se enviarán {len(plan['mensajes'])} correos desde {plan['cuenta']}.",
                   font=('Segoe UI', 12, 'bold')).pack(anchor=tk.W)
-        ttk.Label(marco, text="Confirma después de revisar sus destinatarios y PDFs en Gmail.").pack(anchor=tk.W, pady=(6, 12))
+        ttk.Label(marco, text="Haz clic en una fila para abrir su PDF y revisarlo antes de confirmar el envío.").pack(anchor=tk.W, pady=(6, 12))
         tabla = ttk.Treeview(marco, columns=("destino", "asunto", "pdf"), show="headings", height=12)
-        for clave, titulo, ancho in (("destino", "Destinatario", 220), ("asunto", "Asunto en Gmail", 240), ("pdf", "PDF adjunto", 360)):
+        for clave, titulo, ancho in (("destino", "Destinatario", 220), ("asunto", "Asunto", 240), ("pdf", "PDF adjunto", 360)):
             tabla.heading(clave, text=titulo)
             tabla.column(clave, width=ancho)
         barra = ttk.Scrollbar(marco, orient="vertical", command=tabla.yview)
         tabla.configure(yscrollcommand=barra.set)
         barra.pack(side=tk.RIGHT, fill=tk.Y)
         tabla.pack(fill=tk.BOTH, expand=True)
+        adjuntos_por_fila = {}
         for item in plan["mensajes"]:
-            tabla.insert("", tk.END, values=(item["email"], item["asunto"], item["archivo"]))
+            fila = tabla.insert("", tk.END, values=(item["email"], item["asunto"], item["archivo"]))
+            adjuntos_por_fila[fila] = item
+
+        def abrir_pdf(fila):
+            item = adjuntos_por_fila.get(fila)
+            if item is None:
+                return
+            tabla.selection_set(fila)
+            tabla.focus(fila)
+            try:
+                base = Path(carpeta).resolve()
+                ruta = (base / item["archivo"]).resolve()
+                if ruta.parent != base or ruta.suffix.lower() != ".pdf":
+                    raise ValueError("El adjunto no es un PDF de la carpeta del lote.")
+                if not ruta.is_file():
+                    raise ValueError("No se encuentra el PDF. Vuelve a generar el lote antes de enviar.")
+                if hashlib.sha256(ruta.read_bytes()).hexdigest() != item["sha256"]:
+                    raise ValueError("El PDF ha cambiado desde la comprobación. Cancela y vuelve a revisar el lote.")
+                os.startfile(str(ruta))
+            except (OSError, ValueError) as exc:
+                messagebox.showerror("No se pudo abrir el PDF", str(exc), parent=ventana)
+
+        tabla.configure(cursor="hand2")
+        tabla.bind("<ButtonRelease-1>", lambda evento: abrir_pdf(tabla.identify_row(evento.y)))
+        tabla.bind("<Return>", lambda evento: abrir_pdf(tabla.focus()))
 
         def cerrar():
             ventana.grab_release()
@@ -1294,7 +1212,7 @@ Gfg Kids"""
         acciones = ttk.Frame(marco)
         acciones.pack(fill=tk.X, pady=(15, 0))
         ttk.Button(acciones, text="Cancelar", command=cerrar).pack(side=tk.LEFT)
-        ttk.Button(acciones, text=f"Enviar los {len(plan['mensajes'])} borradores revisados",
+        ttk.Button(acciones, text=f"Enviar los {len(plan['mensajes'])} correos",
                    command=confirmar).pack(side=tk.RIGHT)
 
     def abrir_carpeta_salida(self):
