@@ -3,6 +3,7 @@ Módulo para leer datos desde archivos Excel
 """
 
 import openpyxl
+from datetime import datetime, date, time
 from pathlib import Path
 from typing import List, Dict
 
@@ -53,10 +54,7 @@ class LectorExcel:
                     if idx < len(encabezados):
                         # Convertir el valor a string si no es None
                         valor = cell.value
-                        if valor is not None:
-                            registro[encabezados[idx]] = str(valor)
-                        else:
-                            registro[encabezados[idx]] = ""
+                        registro[encabezados[idx]] = self._formatear_valor(valor)
                 
                 # Solo agregar si hay al menos un dato
                 if any(registro.values()):
@@ -70,6 +68,25 @@ class LectorExcel:
                 self.workbook.close()
             raise Exception(f"Error al leer el archivo Excel: {str(e)}")
     
+    @staticmethod
+    def _formatear_valor(valor) -> str:
+        """
+        Convierte el valor de una celda a texto legible.
+
+        Las celdas de fecha/hora de Excel llegan como datetime y al hacer
+        str() producen cadenas del tipo "2026-06-29 22:46:23.014000",
+        que no deben aparecer en el documento final.
+        """
+        if valor is None:
+            return ""
+        if isinstance(valor, datetime):
+            return valor.strftime("%d/%m/%Y")
+        if isinstance(valor, date):
+            return valor.strftime("%d/%m/%Y")
+        if isinstance(valor, time):
+            return valor.strftime("%H:%M")
+        return str(valor)
+
     def obtener_columnas(self) -> List[str]:
         """
         Obtiene la lista de columnas (encabezados) del Excel
