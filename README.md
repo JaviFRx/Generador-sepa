@@ -1,612 +1,164 @@
-# Generador de Consentimientos SEPA 🏦
+# Generador de Consentimientos SEPA
 
-Sistema automatizado para generar documentos de domiciliación bancaria SEPA (Single Euro Payments Area) en formato PDF con campos editables, a partir de datos de Excel.
+Aplicación para Windows que genera PDFs de domiciliación SEPA desde un Excel y una
+plantilla Word. Permite revisar cada PDF y enviarlo por Gmail al destinatario
+asociado, con comprobaciones antes del envío y de la copia en Enviados.
 
-![Version](https://img.shields.io/badge/version-1.0.0-blue)
-![Python](https://img.shields.io/badge/python-3.10%2B-blue)
-![License](https://img.shields.io/badge/license-MIT-green)
+- [Guía rápida](GUIA_RAPIDA.md): uso diario y resolución de errores.
+- [Ejecutable](INSTRUCCIONES_EXE.md): compilación y actualización.
+- [Documentación técnica](DOCUMENTACION_TECNICA.md): validaciones, historial y pruebas.
 
-## ✨ Características Principales
+## Requisitos e inicio
 
-- 📊 **Lectura inteligente de Excel**: Importa datos desde archivos .xlsx o .xls
-- 🎯 **Mapeo interactivo de campos**: Sistema visual para asignar columnas del Excel a campos del formulario
-- 🤖 **Auto-detección inteligente**: Reconoce automáticamente columnas por palabras clave (español/catalán)
-- 🌍 **Auto-completado geográfico**: Busca automáticamente código postal ↔ población/provincia
-- 📝 **PDF con campos editables**: Genera PDFs con campos de fecha, localidad y firma editables
-- 📧 **Envío de emails por Gmail**: Envía automáticamente los PDFs a través de tu cuenta de Gmail
-- 💾 **Configuración persistente**: Guarda credenciales y configuración de emails para reutilizar
-- 🔐 **Encriptación de credenciales**: Contraseña de Gmail encriptada y segura
-- 📋 **Personalización de emails**: Configura asunto y cuerpo del email con variables como `{nombre}`
-- 🎨 **Interfaz moderna**: GUI intuitiva con diseño colorido y responsive
-- 📁 **Gestión de archivos**: Apertura directa de carpeta de salida
+- Windows y Microsoft Word instalado para convertir los documentos a PDF.
+- Excel `.xlsx`, con encabezados en la primera fila. Convierte los `.xls` antiguos
+  a `.xlsx`. Se utiliza la hoja activa del libro.
+- Plantilla `.docx` con marcadores `{{campo}}`.
+- Cuenta Gmail y contraseña de aplicación para enviar; conexión a internet para
+  Gmail y para las consultas geográficas opcionales.
 
-## 🖼️ Capturas de Pantalla
+Ejecuta `dist/Generador_Consentimientos_SEPAS.exe`. La entrega actual está en
+`E:/Sepas/dist/Generador_Consentimientos_SEPAS.exe`. Incluye Python y dependencias,
+pero no Microsoft Word.
 
-### Pantalla Principal
-- Interfaz con botones grandes y coloridos
-- Generación de PDFs, preparación de emails y apertura de carpeta de salida
+Para ejecutar desde el código con Python 3.10 o posterior, en PowerShell:
 
-### Ventana de Mapeo Inteligente
-- Sistema guiado campo por campo
-- Auto-detección de columnas
-- Valores fijos para campos comunes
-- Auto-completado geográfico
-
-## 📋 Requisitos
-
-- **Python 3.10 o superior**
-- **Microsoft Word** (para conversión a PDF)
-- **Conexión a internet** (opcional, para auto-completado geográfico)
-
-## 🚀 Instalación / Ejecución rápida
-
-Si solo quieres usar el programa sin instalar Python, ejecuta directamente el archivo: `dist/Generador_Consentimientos_SEPAS.exe`.
-
-### 1️⃣ Clonar el repositorio
-
-```bash
-git clone https://github.com/JaviFRx/Generador-sepa.git
-cd Generador-sepa
-```
-
-### 2️⃣ Crear entorno virtual
-
-```bash
-# Windows
-python -m venv .venv
-.venv\Scripts\activate
-
-# Linux/Mac
-python3 -m venv .venv
-source .venv/bin/activate
-```
-
-### 3️⃣ Instalar dependencias
-
-```bash
-pip install -r requirements.txt
-```
-
-## 📦 Dependencias
-
-```
-openpyxl==3.1.2       # Lectura de archivos Excel
-python-docx==1.1.0    # Manipulación de documentos Word
-docx2pdf==0.1.8       # Conversión de Word a PDF
-pypdf==6.6.1          # Creación de campos editables en PDF
-pywin32==311          # Interacción con Word en Windows
-cryptography==42.0.0  # Encriptación de credenciales
-```
-
-## 🎯 Uso Básico
-
-### 1. Ejecutar la aplicación
-
-- Opción A (rápida, sin Python): `dist/Generador_Consentimientos_SEPAS.exe`
-- Opción B (con Python):
-```bash
-python app_consentimientos.py
-```
-
-### 2. Flujo de trabajo completo
-
-1. **Selecciona Excel** → Se abre ventana de mapeo automático
-2. **Configura mapeo** → Asigna columnas del Excel a campos de la plantilla
-3. **Selecciona plantilla Word** → Documento con los marcadores `{{campo}}`
-4. **Genera PDFs** → Crea archivos PDF individuales con campos editables
-5. **Configurar correo** → Configura asunto y cuerpo y revisa la lista de adjuntos
-6. **Crear borradores (Gmail)** → Guarda los correos con sus PDFs en Borradores
-7. **Revisa en Gmail** → Abre cada borrador y comprueba destinatario y PDF
-8. **Enviar borradores revisados** → Vuelve a la app, comprueba la lista y confirma el envío
-
-### 2. Preparar tu plantilla Word
-
-Añade marcadores en tu plantilla con formato `{{nombre_campo}}`:
-
-```
-Referencia de la orden de domiciliación: {{referencia_orden}}
-Nombre del deudor: {{nombre_deudor}}
-Dirección: {{direccion_deudor}}
-Código postal: {{codigo_postal}}
-Población: {{poblacion}}
-Provincia: {{provincia}}
-País: {{pais_deudor}}
-IBAN: {{iban}}
-Swift BIC: {{swift_bic}}
-
-En {{localidad_firma}}, a {{fecha}}
-
-Firma del deudor: {{firma}}
-```
-
-### 3. Configurar cuenta Gmail para borradores
-
-Para guardar borradores en Gmail desde la app:
-
-1. **Activa verificación en 2 pasos** en tu cuenta Google
-2. **Ve a** https://myaccount.google.com/apppasswords
-3. **Genera contraseña** para "Mail" y "Windows"
-4. **Copia la contraseña** en la app (campo "Contraseña de aplicación")
-5. Haz click en **"💾 Guardar Configuración"**
-
-La contraseña se guardará **encriptada** y se reutilizará automáticamente.
-
-### 4. Personalizar emails
-
-En la ventana de **"Preparar Emails"**:
-- Configura el **asunto** (ej: "Mandato SEPA: Confirmación de datos para cobros periódicos")
-- Edita el **cuerpo** del email
-- Usa `{nombre}` para personalizar automáticamente (se reemplaza con cada destinatario)
-- Click en **"Guardar y Generar Borradores"**
-
-### 3. Preparar tu Excel
-
-Tu Excel debe tener columnas como:
-- Nombre del alumno / Nom de l'alumne
-- Apellidos / Cognoms
-- Nombre del titular / Titular compte bancari
-- Dirección / Adreça
-- Código postal / Codi postal
-- Población / Població
-- IBAN
-- Swift BIC
-- etc.
-
-### 4. Proceso de generación
-
-1. **Seleccionar Excel** → Se abre ventana de mapeo automáticamente
-2. **Configurar mapeo**:
-   - Asigna cada campo al nombre de columna del Excel
-   - El sistema auto-detecta las columnas más probables
-   - Puedes usar valores fijos (ej: mismo código postal para todos)
-3. **Auto-completado geográfico**:
-   - Escribe código postal → rellena población, provincia, país
-   - O escribe población → rellena código postal y provincia
-4. **Generar PDFs**: Crea documentos con campos editables
-
-## 🔖 Campos SEPA Soportados
-
-### Datos del Alumno
-- `{{referencia_orden}}` - Auto-generado: Nombre_Apellido_Robotica
-
-### Datos del Deudor
-- `{{nombre_deudor}}` - Nombre del titular de la cuenta
-- `{{direccion_deudor}}` - Dirección completa
-- `{{codigo_postal}}` - Código postal
-- `{{poblacion}}` - Población/Ciudad
-- `{{provincia}}` - Provincia
-- `{{pais_deudor}}` - País
-
-### Datos Bancarios
-- `{{iban}}` - Número de cuenta IBAN
-- `{{swift_bic}}` - Código Swift BIC del banco
-
-### Datos del Acreedor
-- `{{identificador_acreedor}}` - Identificador del acreedor
-- `{{nombre_acreedor}}` - Nombre del acreedor
-- `{{direccion_acreedor}}` - Dirección del acreedor
-
-### Campos Auto-generados
-- `{{fecha}}` - Fecha actual (formato: DD/MM/AAAA)
-- `{{localidad_firma}}` - Copia de la población del deudor
-
-### Campos Editables en PDF
-- **Fecha** - Campo editable para firma
-- **Localidad** - Campo editable para lugar de firma
-- **Firma** - Campo editable para firma del deudor
-
-## 🧠 Auto-detección Inteligente
-
-El sistema detecta automáticamente columnas usando palabras clave:
-
-| Campo | Palabras clave detectadas |
-|-------|--------------------------|
-| Nombre alumno | nombre, nom, name, alumne, alumno |
-| Apellido | apellido, cognom, surname, cognoms |
-| IBAN | iban, cuenta, account, bancaria, compte |
-| Código postal | cp, codigo postal, codi postal, zip |
-| Población | poblacion, població, ciudad, localidad |
-| Provincia | provincia, prov, province |
-| etc. | ... |
-
-## 📁 Estructura del Proyecto
-
-```
-Generador-sepa/
-├── app_consentimientos.py              # Aplicación principal
-├── modulos/
-│   ├── __init__.py
-│   ├── lector_excel.py                 # Lectura de Excel
-│   ├── generador_word.py               # Generación Word/PDF con campos editables
-│   └── preparador_emails.py            # Preparación de emails
-├── docs/
-│   └── plantilla_domiciliacion_sepa.docx  # Plantilla SEPA
-├── ejemplos/
-│   └── datos_ejemplo.xlsx              # Excel de ejemplo
-├── requirements.txt                    # Dependencias
-├── .gitignore                         # Archivos ignorados
-└── README.md                          # Este archivo
-```
-
-## ⚙️ Configuración Avanzada
-
-### Personalizar campos editables
-
-Edita `modulos/generador_word.py`, método `_anadir_campos_editables()`:
-
-```python
-campos = [
-    {'nombre': 'fecha', 'x': 150, 'y': page_height - 680, 'width': 120, 'height': 20},
-    {'nombre': 'localidad', 'x': 350, 'y': page_height - 680, 'width': 200, 'height': 20},
-    {'nombre': 'firma', 'x': 150, 'y': page_height - 720, 'width': 400, 'height': 60}
-]
-```
-
-Ajusta valores de `x`, `y`, `width` y `height` según tu plantilla.
-
-## 🐛 Solución de Problemas
-
-### Error: "Microsoft Word no está instalado"
-- **Solución**: Instala Microsoft Word o usa una alternativa compatible con docx2pdf
-
-### Los campos no se auto-detectan
-- **Solución**: Renombra las columnas del Excel con nombres más descriptivos
-
-### El auto-completado geográfico no funciona
-- **Solución**: Verifica tu conexión a internet. Usa valores fijos si no tienes conexión
-
-### Los campos editables no aparecen en el PDF
-- **Solución**: Abre el PDF con Adobe Reader o un lector compatible con formularios PDF
-
-## 🤝 Contribuciones
-
-Las contribuciones son bienvenidas:
-
-1. Fork el proyecto
-2. Crea una rama (`git checkout -b feature/NuevaCaracteristica`)
-3. Commit tus cambios (`git commit -m 'Añadir nueva característica'`)
-4. Push a la rama (`git push origin feature/NuevaCaracteristica`)
-5. Abre un Pull Request
-
-## 📜 Licencia
-
-Este proyecto está bajo la Licencia MIT. Ver archivo `LICENSE` para más detalles.
-
-## 🙏 Agradecimientos
-
-- **APIs utilizadas**: 
-  - [Zippopotam.us](http://zippopotam.us) - Búsqueda de códigos postales
-  - [OpenStreetMap Nominatim](https://nominatim.openstreetmap.org) - Geocodificación
-- **Librerías Python**: openpyxl, python-docx, docx2pdf, pypdf
-
-## 👤 Autor
-
-**JaviFRx**
-
-- GitHub: [@JaviFRx](https://github.com/JaviFRx)
-- Proyecto: [Generador-sepa](https://github.com/JaviFRx/Generador-sepa)
-
-## 📝 Changelog
-
-### v1.0.0 (2026-01-25)
-- ✨ Mapeo inteligente de campos con auto-detección
-- 🌍 Auto-completado geográfico (código postal ↔ población)
-- 📝 PDFs con campos editables (fecha, localidad, firma)
-- 🎨 Interfaz gráfica moderna y responsive
-- 🔄 Scroll con rueda del ratón en ventana de mapeo
-- 📊 Soporte multi-idioma (español/catalán)
-
----
-
-⭐ Si este proyecto te ha sido útil, considera darle una estrella en GitHub!
-Cree un documento Word (.docx) con marcadores usando el formato `{{campo}}`:
-- `{{nombre}}` - Se reemplazará por el nombre
-- `{{apellido}}` - Se reemplazará por el apellido
-- `{{email}}` - Se reemplazará por el email
-- `{{dni}}` - Se reemplazará por el DNI
-- `{{fecha}}` - Se reemplazará por la fecha
-
-**Ejemplo de plantilla:**
-```
-CONSENTIMIENTO INFORMADO
-
-Yo, {{nombre}} {{apellido}}, con DNI {{dni}}, declaro que:
-
-1. He sido informado/a sobre...
-2. Autorizo...
-
-Fecha: {{fecha}}
-
-Firma: _________________
-```
-
-### 2. Ejecutar la aplicación
-
-```bash
-python app_consentimientos.py
-```
-
-### 3. Usar la interfaz
-
-1. **Seleccionar Excel**: Click en "Seleccionar Excel" y elegir su archivo
-2. **Seleccionar Plantilla**: Click en "Seleccionar Plantilla" y elegir su documento Word
-3. **Seleccionar Carpeta de Salida**: (Opcional) Elegir dónde guardar los archivos generados
-4. **Generar Consentimientos**: Click en "Leer Excel y Generar Consentimientos"
-5. **Preparar Emails**: Click en "Preparar Emails" para crear borradores de correo
-
-## 📁 Estructura del Proyecto
-
-```
-Sepas/
-│
-├── app_consentimientos.py          # Aplicación principal
-├── modulos/
-│   ├── __init__.py
-│   ├── lector_excel.py             # Lectura de archivos Excel
-│   ├── generador_word.py           # Generación de documentos Word
-│   └── preparador_emails.py        # Preparación de emails
-│
-├── ejemplos/
-│   ├── plantilla_consentimiento.docx   # Plantilla de ejemplo
-│   └── datos_ejemplo.xlsx               # Datos de ejemplo
-│
-├── requirements.txt                # Dependencias del proyecto
-└── README.md                      # Este archivo
-```
-
-## 📤 Archivos Generados
-
-Al ejecutar el programa, se crearán:
-
-1. **Consentimientos individuales (PDFs)**: 
-   - Con campos editables para fecha, localidad y firma
-   - Nombrados automáticamente según datos del Excel
-
-2. **Lista de borradores** (`emails_para_enviar.txt`):
-   - Contiene todos los borradores de email
-   - Incluye destinatario, asunto y cuerpo del mensaje
-   - Útil para revisar antes de enviar
-
-3. **CSV de emails** (`emails_lista.csv`):
-   - Formato CSV para importar a clientes de correo
-   - Contiene email, nombre, asunto y archivo adjunto
-
-4. **Configuración guardada** (`~/.sepas_config.json`):
-   - Credenciales de Gmail (encriptadas)
-   - Configuración de emails (asunto y cuerpo)
-   - Se carga automáticamente al abrir la app
-
-## 🔐 Seguridad
-
-- **Credenciales encriptadas**: La contraseña de Gmail se encripta antes de guardar
-- **Almacenamiento local**: Todo se guarda en tu archivo de configuración personal
-- **Clave única por usuario**: La encriptación usa el usuario de Windows como clave
-- **No se envía a internet**: Los datos de configuración nunca se sincronizar en la nube
-
-## 📧 Borradores en Gmail
-
-### Flujo de revisión y envío manual
-
-**El envío se hace después de revisar los borradores en Gmail.** Primero pulsa
-**Crear borradores (Gmail)**. Cada mensaje queda en Borradores con su destinatario,
-asunto, cuerpo y PDF adjunto. Después de revisarlos, vuelve a la app y pulsa
-**Enviar borradores revisados (Gmail)**. Verás la lista de destinatarios, asuntos
-y PDFs antes de confirmar. La cuenta y contraseña de aplicación se reutilizan
-para leer los borradores por IMAP y enviarlos por SMTP.
-
-**Corrección de asociación de adjuntos (20/09/2026):** tras actualizar, vuelve a
-generar todos los consentimientos y revisa `emails_lista.csv` antes de enviar.
-Los PDFs antiguos no se pueden enviar con esta versión porque no tienen una
-asociación verificable con el Excel.
-
-Cada generación guarda `registro_consentimientos.json` junto a los PDFs, con la
-asociación de cada registro y la huella del contenido de su archivo. Conserva este
-archivo en la misma carpeta. Si cambia el Excel, falta un PDF, se modifica un
-adjunto, se repite un PDF o la generación queda incompleta, se bloquea todo el
-proceso de creación de borradores antes de conectar con Gmail. Cada fila debe contener un único destinatario
-inequívoco en sus columnas de correo.
-
-Al iniciar una generación con un Excel válido y con registros, se borran los PDFs
-y los borradores de email anteriores de la carpeta de salida. Los demás archivos
-y las subcarpetas se conservan. Si un archivo está abierto y no se puede borrar,
-la generación se detiene y los borradores quedan bloqueados hasta generar un lote completo.
-Revisa los adjuntos indicados en el CSV del nuevo lote antes de enviar.
-
-Al generar los PDFs aparece una ventana modal con los documentos procesados,
-pendientes y fallidos. La conversión se ejecuta en segundo plano para que la
-interfaz siga respondiendo. El reloj se actualiza durante la conversión y la
-estimación se ajusta al terminar cada PDF. La modal se cierra al finalizar.
-
-1. **Configurar correo**:
-   - Configura asunto y cuerpo del email
-   - Personaliza el texto con `{nombre}`
-   - Se generan `emails_lista.csv` y `emails_para_enviar.txt` para revisar la asociación
-
-2. **Crear borradores (Gmail)**:
-   - Requiere credenciales de Gmail
-   - Guarda cada mensaje en Borradores mediante IMAP, con su PDF verificado
-   - Detecta la carpeta de borradores aunque Gmail esté en otro idioma
-   - Si encuentra el mismo identificador de mensaje en Borradores, lo omite
-   - Muestra creados, ya existentes, pendientes y mensajes sin confirmación
-
-3. **Revisar en Gmail y enviar desde la app**:
-   - Abre Gmail con la misma cuenta y entra en **Borradores**
-   - Comprueba el destinatario y abre el PDF
-   - Vuelve a la app y pulsa **Enviar borradores revisados (Gmail)**
-   - Comprueba la lista y confirma con **Enviar los N borradores revisados**
-   - Los borradores guardados en Gmail se gestionan allí: regenerar los PDFs solo
-     limpia los archivos locales. Elimina en Gmail los borradores de lotes antiguos
-     que ya no quieras usar
-
-Si se interrumpe la conexión, revisa Gmail antes de reintentar. Un borrador puede
-haberse guardado aunque no se haya recibido su confirmación. La aplicación no
-reintenta automáticamente. La detección de duplicados se aplica mientras el
-mensaje conserve su identificador y siga en Borradores.
-
-Referencia técnica: [carpetas especiales de Gmail mediante IMAP](https://developers.google.com/workspace/gmail/imap/imap-extensions).
-
-El botón de envío descarga el contenido actual de los borradores; no reconstruye
-el correo desde el Excel. Conserva los cambios de asunto y texto hechos en Gmail.
-El destinatario y el PDF deben seguir coincidiendo con el lote generado: cambios,
-adjuntos adicionales, CC/CCO, duplicados o borradores ausentes bloquean la operación.
-Los borradores ajenos al lote se dejan intactos.
-
-Tras confirmar, se comprueba otra vez que los mensajes no hayan cambiado. Cada
-envío se registra en `historial_borradores.json`, que debes conservar. Los envíos
-confirmados no se repiten y sus borradores se retiran individualmente de Gmail.
-Si se pierde la confirmación de un envío, el lote queda bloqueado para evitar
-duplicados: comprueba **Enviados** en Gmail antes de resolver el estado pendiente.
-Si el envío se confirmó pero no se pudo retirar el borrador, se avisa y se detiene
-el lote; ese correo no se vuelve a enviar desde la app.
-
-Los borradores creados con la versión anterior se reconocen por su identificador
-si aún lo conservan y usas los mismos ajustes de asunto y texto. Si Gmail ha
-cambiado ese identificador y no existe historial local, se bloquea la asociación
-en lugar de adivinar a qué lote pertenecen.
-
-### Generador de contraseña de aplicación
-
-Para usar Gmail con seguridad sin exponer tu contraseña:
-
-1. Ve a https://myaccount.google.com/security
-2. Activa **Verificación en 2 pasos** (si no lo has hecho)
-3. Ve a https://myaccount.google.com/apppasswords
-4. Selecciona "Mail" y "Windows"
-5. Google te generará una contraseña de 16 caracteres
-6. Cópiala en el campo de la app sin espacios
-
-**Nota**: Esta contraseña es específica para esta app y puedes revocarla en cualquier momento.
-
-## 🔧 Personalización
-
-### Modificar plantilla de email predeterminada
-Edita en `app_consentimientos.py`, método `preparar_emails()`:
-
-```python
-texto_defecto = """Estimado/a {nombre},
-
-Tu mensaje personalizado aquí...
-"""
-```
-
-### Cambiar configuración de Gmail
-En la ventana principal:
-1. Introduce el correo Gmail
-2. Introduce contraseña de aplicación
-3. (Opcional) Introduce nombre del remitente
-4. Click en **"💾 Guardar Configuración"**
-
-## ⚠️ Solución de Problemas
-
-### Error: "Word no responde"
-**Solución**: Cierra Word manualmente o ejecuta:
 ```powershell
-taskkill /F /IM WINWORD.EXE
+python -m venv .venv
+.venv/Scripts/python.exe -m pip install -r requirements.txt
+.venv/Scripts/python.exe app_consentimientos.py
 ```
 
-### Error: "Módulos no encontrados"
-**Solución**: Instalar dependencias
-```bash
-pip install -r requirements.txt
-```
+Las versiones de las dependencias están en [requirements.txt](requirements.txt).
 
-### Error: "El archivo Excel no se puede leer"
-**Soluciones**:
-- Verificar que el archivo sea .xlsx o .xls
-- Cerrar el archivo si está abierto en Excel
-- Verificar que el archivo tenga encabezados en la primera fila
+## Flujo de trabajo
 
-### Los marcadores no se reemplazan
-**Soluciones**:
-- Verificar que los marcadores usen `{{}}` dobles llaves
-- Asegurarse que los nombres coincidan con los encabezados del Excel
-- Revisar que no haya espacios dentro de los marcadores
+1. Selecciona el Excel, la plantilla Word y la carpeta de salida.
+2. Revisa el mapeo de columnas y campos. Puedes usar valores fijos y completar
+   población, provincia y código postal.
+3. Pulsa **Generar consentimientos en PDF**. Una modal muestra procesados,
+   pendientes, errores, tiempo transcurrido y estimación mientras Word trabaja
+   en segundo plano.
+4. Pulsa **Configurar correo**. Personaliza asunto y texto; `{nombre}` inserta el
+   nombre detectado. Se generan listas locales para revisión.
+5. Pulsa **Enviar correos (Gmail)**. La app comprueba todo el lote y muestra
+   destinatario, asunto y PDF de cada correo pendiente.
+6. **Haz clic en una fila para abrir su PDF** en el visor predeterminado.
+   También puedes seleccionar una fila y pulsar Intro. Abrir el PDF no envía nada.
+7. Confirma **Enviar los N correos** o cancela.
+8. Revisa el resumen y `informe_envios.csv` en la carpeta de salida.
 
-### Error de Gmail: "Credenciales inválidas"
-**Causa**: Contraseña incorrecta o cuenta no tiene 2FA habilitado
-**Solución**:
-1. Activar autenticación de dos factores en tu cuenta Google
-2. Generar una "Contraseña de aplicación" (ver sección "Envío de Emails")
-3. Usar la contraseña de aplicación (16 caracteres) en lugar de la contraseña normal
-4. Verificar que el email esté escrito correctamente (incluyendo @gmail.com)
+## Excel y destinatarios
 
-### Error: "PDF no encontrado"
-**Causa**: Los archivos de consentimiento generados no se encuentran en la carpeta
-**Soluciones**:
-1. Verificar que el paso "Generar Consentimientos" finalizó correctamente (revisar log)
-2. Revisar que el mapeo de campos sea correcto (especialmente nombres de alumno)
-3. Los PDFs deben estar en la misma carpeta del ejecutable o especificados en configuración
-4. Si cambiaste los nombres de columnas en Excel, actualizar el mapeo en el paso 2
+Se reconocen encabezados que contengan `email`, `mail`, `correo` o `correu`, sin
+distinguir mayúsculas. Por ejemplo, `Direcció correu electrònic (minúscula)`.
+Cada registro necesita un único correo válido. Varias columnas con el mismo
+correo se admiten; direcciones distintas en una misma fila bloquean el lote.
+No se elige automáticamente una de las direcciones.
 
-### Error: "timeout esperando response de Word"
-**Causa**: Word tardó demasiado en convertir el documento a PDF
-**Soluciones**:
-1. Cerrar otros programas para liberar memoria
-2. Intentar generar un consentimiento a la vez
-3. Reiniciar Word manualmente (cierra la aplicación y abre de nuevo)
+Los errores identifican la hoja, la fila real del Excel, las columnas y el motivo:
+campo vacío, formato inválido, varias direcciones o encabezado no reconocido.
+Se conserva la numeración aunque haya filas vacías. El detalle se guarda en
+`errores_correos.txt` cuando es posible. Si corriges datos del Excel, regenera
+los PDFs para restablecer la asociación del lote.
 
-## 📝 Notas Importantes
+## Protección de los adjuntos
 
-- Los nombres de columnas en Excel no distinguen mayúsculas/minúsculas
-- Al generar un nuevo lote se borran los PDFs anteriores de la carpeta de salida
-- **Se recomienda revisar los borradores en `emails_para_enviar.txt` antes de enviar emails**
-- Los archivos generados usan formato .docx (Word 2007+)
-- Las contraseñas se guardan **encriptadas** en `~/.sepas_config.json` (tu perfil de Windows)
-- **IMPORTANTE**: Usar "Contraseña de Aplicación" de Google, no la contraseña de tu cuenta personal
+`registro_consentimientos.json` asocia cada fila del Excel con su PDF mediante
+huellas SHA-256. Antes de preparar o enviar se comprueba que:
 
-## 📋 Historial de Cambios
+- El Excel conserva sus registros y su orden.
+- La generación terminó y están todos los PDFs.
+- Cada archivo está en la carpeta de salida y conserva su contenido.
+- No se reutiliza la misma ruta ni un PDF de contenido idéntico entre registros.
+- El destinatario y el adjunto corresponden a su fila original. No se admiten
+  CC/CCO ni adjuntos adicionales en el correo confirmado.
 
-### v2.0.0 - Sistema de Envío de Emails por Gmail
-**Nuevas funcionalidades**:
-- ✅ Envío de emails automático a través de Gmail SMTP
-- ✅ Configuración persistente de credenciales de Gmail (encriptadas)
-- ✅ Personalización de asunto y cuerpo del email
-- ✅ Generación de borradores de email para revisión antes de enviar
-- ✅ Búsqueda inteligente de archivos PDF (flexible con nombres de campos)
-- ✅ Interfaz mejorada con scroll vertical en log de actividades
+Al confirmar se repiten las comprobaciones. Al abrir un PDF desde la lista también
+se verifica que mantiene el contenido revisado.
 
-**Cambios técnicos**:
-- Agregado: Encriptación Fernet para almacenamiento seguro de contraseñas
-- Agregado: SMTP Gmail con autenticación SSL
-- Mejorado: PDF search para adaptarse a diferentes esquemas de nombres
-- Mejorado: Interfaz basada en Canvas para mejor UX
+Una nueva generación válida **borra los PDFs anteriores y las listas locales**
+`emails_lista.csv` y `emails_para_enviar.txt`. Conserva historiales, informes,
+otros archivos y subcarpetas. Si no puede borrar un PDF, se detiene.
+Los nombres nuevos incorporan un identificador único.
 
-### v1.0.0 - Generador de Consentimientos SEPA
-**Funcionalidades bases**:
-- Lectura de datos desde Excel
-- Mapeo de campos con plantilla Word
-- Generación de consentimientos en PDF
-- Búsqueda y sustitución de marcadores
+## Interpretar el resultado
 
-## 🔒 Seguridad de Credenciales
+| Resultado | Qué acredita |
+| --- | --- |
+| Aceptados por Gmail | Gmail respondió con aceptación SMTP del mensaje. |
+| Comprobados en Enviados | Se encontró una copia con identificador, destinatario, remitente, asunto y PDF esperados. |
+| Ya enviados anteriormente | El historial ya registra ese correo como enviado; se omite. No es una comprobación nueva. |
+| Pendientes de enviar | No se registró aceptación en esta operación. Si hubo error de conexión, revisa el aviso de posible envío incierto. |
 
-### ¿Cómo se protegen mis contraseñas?
-- Las contraseñas de Gmail se **encriptan localmente** usando el algoritmo Fernet (cryptography)
-- La clave de encriptación se basa en tu nombre de usuario de Windows (SHA-256)
-- Las contraseñas se almacenan encriptadas en `~/.sepas_config.json`
-- **Nunca** se envían a servidores externos; todo es local
+**Aceptación y presencia en Enviados no acreditan entrega ni lectura por el
+destinatario.** Si la copia no se puede comprobar tras tres consultas, se detiene
+el lote y se avisa. El correo aceptado no se repite automáticamente.
 
-### ¿Qué pasa si alguien accede a mi archivo `.sepas_config.json`?
-- Las contraseñas están encriptadas y vinculadas a tu usuario de Windows
-- Si alguien intenta desencriptarlas desde otra cuenta, fallará
-- Se recomienda: Mantener acceso controlado a tu computadora
+El estado se registra antes de contactar con SMTP. Una pérdida de respuesta deja
+el envío sin confirmar y bloquea su repetición. No borres ni edites el historial
+para forzar un reenvío: primero comprueba qué ocurrió.
 
-### ¿Puedo cambiar mi contraseña de Gmail después?
-- Sí, simplemente:
-  1. Abre la aplicación
-  2. En la sección "📧 Envío de Emails", introduce la nueva contraseña de aplicación
-  3. Click en **"💾 Guardar Configuración"**
-  4. La nueva contraseña se encriptará y guardará automáticamente
+La protección usa el historial de la cuenta y los archivos del lote. Regenerar
+crea archivos nuevos; borrar el historial o mover el lote sin él puede perder esa
+protección. Revisa los envíos anteriores antes de enviar un lote regenerado.
 
-## 🤝 Soporte
+## Borradores de versiones anteriores
 
-Para problemas o preguntas, contacte al administrador del sistema.
+La interfaz actual utiliza **envío directo**, con un identificador nuevo por correo.
+No crea ni elimina borradores en Gmail. No envíes manualmente los borradores
+antiguos si la aplicación ya envió ese correo.
 
-## 📄 Licencia y Términos
+Se mantiene `historial_borradores.json` para conservar los estados anteriores.
+Un registro antiguo `enviado` se omite aunque no tenga fecha de comprobación en
+Enviados. Un mensaje ausente no se puede dar por entregado solo por ese registro.
 
-Software propiedad de Javier Fernández Ramos. Uso y distribución sujetos a autorización expresa del autor.
+## Archivos de salida
 
-**Términos de uso**:
-- Uso autorizado únicamente por el autor o quienes cuenten con su permiso
-- No reproducir, distribuir o modificar sin autorización expresa
-- Las contraseñas almacenadas son responsabilidad del usuario
+| Archivo | Uso |
+| --- | --- |
+| `*.pdf` | Consentimientos con campos editables de firma, fecha y localidad. |
+| `registro_consentimientos.json` | Asociación de filas y PDFs; conservar junto al lote. |
+| `emails_lista.csv` | Destinatario, nombre, asunto y archivo adjunto para revisión. |
+| `emails_para_enviar.txt` | Texto local de correos; no son borradores de Gmail. |
+| `historial_borradores.json` | Estados, identificadores y comprobaciones de envío. |
+| `informe_envios.csv` | Aceptación SMTP y comprobación en Enviados, con fechas UTC. |
+| `errores_correos.txt` | Último diagnóstico de correo fallido que pudo guardarse. |
+| `operacion_correo.lock` | Bloqueo temporal contra operaciones simultáneas. |
+
+## Plantilla y configuración
+
+La plantilla principal es `Docs/plantilla_domiciliacion_sepa.docx`; puedes elegir
+otra. El mapeo permite usar encabezados distintos a los marcadores. Campos
+habituales: `{{referencia_orden}}`, `{{nombre_deudor}}`, `{{direccion_deudor}}`,
+`{{codigo_postal}}`, `{{poblacion}}`, `{{provincia}}`, `{{pais_deudor}}`, `{{iban}}`,
+`{{swift_bic}}`, `{{fecha}}` y `{{localidad_firma}}`.
+Las fechas de Excel se presentan como `DD/MM/AAAA`; las horas, como `HH:MM`.
+
+Introduce la cuenta y su contraseña de aplicación de Google y pulsa **Guardar
+Configuración**. Gestiona la contraseña en [Google](https://myaccount.google.com/apppasswords).
+La configuración está en `.sepas_config.json`, dentro del perfil de Windows.
+
+La contraseña se cifra con Fernet usando una clave derivada del nombre de usuario
+de Windows. No sustituye un almacén de credenciales del sistema: conocer el nombre
+permite reproducir la clave. Existe también compatibilidad con valores sin cifrar
+si falla el cifrado. No publiques ese archivo. La contraseña se utiliza para
+autenticarse con Gmail mediante TLS y no se incluye en los informes.
+
+## Cambios de septiembre de 2026
+
+- Asociación verificable entre cada fila y su PDF; nombres únicos y limpieza del lote.
+- Generación en segundo plano con modal de progreso.
+- Envío directo con confirmación, respuesta SMTP y comprobación en Enviados.
+- Compatibilidad con el historial anterior para no repetir registros enviados.
+- Reconocimiento de `correu` y errores con filas y columnas.
+- Apertura del PDF con clic o Intro desde la confirmación.
+- Documentación de pruebas y actualización de la entrega en `E:/Sepas/dist`.
+
+## Autor y términos
+
+Autor: [JaviFRx](https://github.com/JaviFRx).
+
+Software propiedad de Javier Fernández Ramos. Uso y distribución sujetos a
+autorización expresa del autor. No reproducir, distribuir o modificar sin esa
+autorización. Las contraseñas almacenadas son responsabilidad del usuario.

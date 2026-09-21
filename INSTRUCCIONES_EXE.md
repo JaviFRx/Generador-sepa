@@ -1,77 +1,55 @@
-# 🚀 EJECUTABLE CREADO CON ÉXITO
+# Ejecutable de Windows
 
-## 📍 Ubicación del Archivo
+## Ubicación y uso
 
-El ejecutable se encuentra en:
-```
-d:\Sepas\dist\Generador_Consentimientos_SEPAS.exe
-```
+La entrega se instala directamente en `E:/Sepas/dist/Generador_Consentimientos_SEPAS.exe`.
+No se utiliza `dist/actualizado`. Sigue la [guía rápida](GUIA_RAPIDA.md).
 
-## 💡 Cómo Usar el Ejecutable
+El archivo incluye Python y las dependencias. Microsoft Word debe estar instalado
+para generar PDFs. La cuenta Gmail se configura en cada equipo.
+La configuración está en `.sepas_config.json`, dentro del perfil de Windows.
+Guarda los PDFs y su historial fuera de `dist`, porque se reemplaza al actualizar.
 
-### Opción 1: Uso Directo (Recomendado)
-1. Ve a la carpeta: `d:\Sepas\dist\`
-2. Haz doble clic en: `Generador_Consentimientos_SEPAS.exe`
-3. La aplicación se abrirá automáticamente
+## Compilar
 
-### Opción 2: Distribución a Otros PCs
-Para usar en otra computadora SIN Python instalado:
+Desde la raíz del proyecto, en PowerShell:
 
-1. **Copiar estos archivos/carpetas:**
-   ```
-   ✓ Generador_Consentimientos_SEPAS.exe
-   ✓ ejemplos/ (carpeta con archivos de ejemplo)
-   ```
-
-2. **En la nueva computadora:**
-   - Pegar los archivos en cualquier carpeta
-   - Doble clic en `Generador_Consentimientos_SEPAS.exe`
-   - ¡Listo!
-
-## 📦 ¿Qué Incluye el .EXE?
-
-El ejecutable incluye TODO lo necesario:
-- ✅ Python integrado
-- ✅ Todas las librerías (openpyxl, python-docx)
-- ✅ Módulos del sistema (lector_excel, generador_word, preparador_emails)
-- ✅ Interfaz gráfica
-- ✅ No requiere instalación
-
-## ⚙️ Tamaño del Archivo
-
-El .exe pesa aproximadamente **20-25 MB** porque incluye:
-- Runtime de Python
-- Todas las dependencias
-- Módulos del sistema
-
-## 🎯 Ventajas del Ejecutable
-
-✅ **No necesita Python instalado**
-✅ **Funciona en cualquier PC con Windows 10/11**
-✅ **Un solo archivo, portátil**
-✅ **No requiere permisos de administrador**
-✅ **Fácil de distribuir**
-
-## 📝 Notas Importantes
-
-1. **Primera Ejecución**: Puede tardar unos segundos en abrir (es normal)
-2. **Antivirus**: Algunos antivirus pueden marcarlo como sospechoso (falso positivo). Agrega una excepción si es necesario.
-3. **Archivos Generados**: Los consentimientos se guardarán en la carpeta que elijas
-
-## 🔧 Si Necesitas Regenerar el .EXE
-
-Ejecuta en la terminal:
-```bash
-D:/Sepas/.venv/Scripts/pyinstaller.exe --clean build_exe.spec
+```powershell
+.venv/Scripts/python.exe -m pip install -r requirements.txt
+.venv/Scripts/python.exe -m pip install pyinstaller
+.venv/Scripts/python.exe -m PyInstaller --noconfirm --workpath build/progreso --distpath build/entrega_progreso Generador_Consentimientos_SEPAS.spec
 ```
 
-O usa el script:
-```cmd
-## 📝 Notas Importantes
-crear_ejecutable.bat
+La entrada es `app_consentimientos.py`. El `.spec` principal incorpora los módulos
+y la plantilla de `Docs`. Los archivos con sufijo `(1)` son copias históricas,
+no las entradas de la compilación actual.
+
+En este equipo se usa una copia local de Tcl/Tk para compilar y ejecutar las
+pruebas gráficas. Si esas carpetas están presentes, configura antes:
+
+```powershell
+$env:TCL_LIBRARY = 'E:/Sepas/build/tcl_runtime/tcl8.6'
+$env:TK_LIBRARY = 'E:/Sepas/build/tcl_runtime/tk8.6'
+$env:PYINSTALLER_CONFIG_DIR = 'E:/Sepas/build/pyinstaller_config'
 ```
 
----
+Son rutas específicas de este entorno; no hacen falta cuando Python dispone de
+Tcl/Tk accesible normalmente. Las entregas documentadas se compilaron con
+Python 3.10.10 y PyInstaller 6.18.0.
 
-**¡El ejecutable está listo para usar!**
-**Ubicación: `d:\Sepas\dist\Generador_Consentimientos_SEPAS.exe`**
+## Reemplazar la entrega
+
+1. Compila en `build/entrega_progreso` y comprueba que finaliza sin errores.
+2. Ejecuta las [pruebas](DOCUMENTACION_TECNICA.md#pruebas) y verifica que el archivo
+   incluye los módulos actualizados.
+3. Cierra la aplicación: Windows impide reemplazar un ejecutable en uso.
+4. Comprueba que el destino resuelto es exactamente `E:/Sepas/dist`, sin enlaces
+   o uniones a otras carpetas y con solo archivos de entrega.
+5. Elimina esa carpeta, créala de nuevo y copia dentro el ejecutable compilado.
+6. Compara las huellas SHA-256 del archivo compilado y la copia final.
+
+La eliminación se limita a `dist`. Conserva las carpetas de salida, historiales,
+plantillas elegidas por el usuario y configuración del perfil.
+
+`dist/` y `build/` están excluidos de Git. El push publica código y documentación;
+el ejecutable se distribuye por separado. Compilar no envía correos.
