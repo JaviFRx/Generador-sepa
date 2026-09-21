@@ -8,6 +8,7 @@ from typing import Dict
 from datetime import datetime
 import re
 import os
+from uuid import uuid4
 from pypdf import PdfReader, PdfWriter
 from pypdf.generic import NameObject, DictionaryObject, ArrayObject, TextStringObject, NumberObject
 
@@ -199,7 +200,7 @@ class GeneradorConsentimientos:
                 time.sleep(0.8)
                 
                 # Verificar si se generó el PDF
-                if not ruta_pdf.exists():
+                if result.returncode != 0 or not ruta_pdf.exists() or ruta_pdf.stat().st_size == 0:
                     error_msg = result.stderr if result.stderr else "Desconocido"
                     raise Exception(f"PDF no generado. Error: {error_msg[:300]}")
                 
@@ -343,7 +344,8 @@ class GeneradorConsentimientos:
         else:
             nombre_base = f"consentimiento_{timestamp}"
         
-        return f"{nombre_base}.docx"
+        # Evitar sobrescribir PDFs de homónimos, hermanos o generaciones anteriores.
+        return f"{nombre_base[:120]}_{uuid4().hex}.docx"
     
     def _limpiar_nombre(self, texto: str) -> str:
         """

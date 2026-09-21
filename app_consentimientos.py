@@ -9,6 +9,8 @@ from tkinter import ttk, filedialog, messagebox, scrolledtext
 import os
 import sys
 import shutil
+import re
+import webbrowser
 from pathlib import Path
 from datetime import datetime
 import urllib.request
@@ -16,7 +18,25 @@ import json
 import urllib.parse
 import base64
 import hashlib
+from time import monotonic
+from math import ceil
+from queue import Queue, Empty
+from threading import Thread
 from cryptography.fernet import Fernet
+
+
+# Pais que se usa cuando el Excel no aporta uno valido
+PAIS_POR_DEFECTO = "España"
+
+# Cabeceras tipicas de columnas de marca temporal (Google Forms, exportaciones)
+COLUMNAS_MARCA_TEMPORAL = (
+    'marca temporal', 'marca de temps', 'timestamp',
+    'fecha y hora', 'data i hora', 'hora de envio', "hora d'enviament",
+)
+
+
+# Guia de uso publicada (se abre desde el boton "Como funciona")
+URL_DOCUMENTACION = "https://claude.ai/code/artifact/55f3fb72-91e1-4b64-aff2-8b81cbb94cb8"
 
 
 def ruta_base_app() -> Path:
@@ -96,13 +116,16 @@ class AplicacionConsentimientos:
         # Mapeo de columnas Excel a campos de la plantilla
         self.mapeo_campos = {}
         self.valores_fijos = {}  # Valores fijos para campos no mapeados
+        self._generando = False
+        self.ventana_progreso = None
+        self.root.protocol("WM_DELETE_WINDOW", self._cerrar_aplicacion)
         
         # Crear interfaz
         self.crear_interfaz()
         
     def crear_interfaz(self):
         """Crea la interfaz gráfica de la aplicación"""
-        
+
         # Frame principal con scroll
         canvas = tk.Canvas(self.root, bg='#f5f5f5', highlightthickness=0)
         scrollbar = ttk.Scrollbar(self.root, orient="vertical", command=canvas.yview)
@@ -142,11 +165,24 @@ class AplicacionConsentimientos:
         
         # Banner de título con color de fondo
         banner_frame = tk.Frame(main_frame, bg='#673AB7', relief=tk.RAISED, bd=3)
-        banner_frame.pack(fill=tk.X, pady=(0, 25))
+        banner_frame.pack(fill=tk.X, pady=(0, 6))
         
         titulo = tk.Label(banner_frame, text="⚕ GENERADOR DE CONSENTIMIENTOS - SEPAS", 
                           font=fuente_titulo, bg='#673AB7', fg='white', pady=15)
         titulo.pack(fill=tk.X)
+        
+        # Enlace discreto a la guia de uso
+        ayuda_frame = tk.Frame(main_frame, bg='#f5f5f5')
+        ayuda_frame.pack(fill=tk.X, pady=(0, 14))
+        
+        btn_ayuda = tk.Button(ayuda_frame, text="❔ Cómo funciona",
+                              command=self.abrir_documentacion,
+                              font=('Arial', 9, 'underline'),
+                              bg='#f5f5f5', fg='#673AB7',
+                              activebackground='#f5f5f5', activeforeground='#512DA8',
+                              relief=tk.FLAT, bd=0, cursor='hand2',
+                              padx=4, pady=0)
+        btn_ayuda.pack(side=tk.RIGHT)
         
         # Sección 1: Archivo Excel
         tk.Label(main_frame, text="➊ Archivo Excel con datos:", 
@@ -197,7 +233,7 @@ class AplicacionConsentimientos:
         btn_carpeta.pack(side=tk.LEFT)
 
         # Sección 4: Cuenta Gmail para envío
-        tk.Label(main_frame, text="➍ Cuenta Gmail para envío (opcional):", 
+        tk.Label(main_frame, text="➍ Cuenta Gmail para crear borradores:", 
                  font=fuente_seccion, bg='#f5f5f5', fg='#333').pack(anchor=tk.W, pady=(20, 5))
 
         gmail_frame = tk.Frame(main_frame, bg='#f5f5f5')
@@ -221,7 +257,7 @@ class AplicacionConsentimientos:
 
         tk.Label(
             gmail_frame,
-            text="Usa una contraseña de aplicación de Gmail (no tu contraseña normal).",
+            text="Crea los borradores, revísalos en Gmail y vuelve aquí para enviarlos cuando estén correctos.",
             font=('Arial', 9),
             bg='#f5f5f5',
             fg='#666'
@@ -256,7 +292,7 @@ class AplicacionConsentimientos:
         self.btn_generar.pack(side=tk.LEFT, padx=10)
         
         # Botón de emails
-        btn_emails = tk.Button(btn_frame, text="📧 PREPARAR\nEMAILS", 
+        btn_emails = tk.Button(btn_frame, text="📧 CONFIGURAR\nCORREO", 
                               command=self.preparar_emails,
                               font=fuente_boton,
                               bg='#00BCD4', fg='white',
@@ -265,14 +301,14 @@ class AplicacionConsentimientos:
                               padx=30, pady=20, width=20, height=4)
         btn_emails.pack(side=tk.LEFT, padx=10)
 
-        btn_enviar = tk.Button(btn_frame, text="📤 ENVIAR\nEMAILS\n(Gmail)", 
-                      command=self.enviar_emails_gmail,
+        self.btn_borradores = tk.Button(btn_frame, text="📝 CREAR\nBORRADORES\n(Gmail)", 
+                      command=self.crear_borradores_gmail,
                       font=fuente_boton,
-                      bg='#F44336', fg='white',
-                      activebackground='#D32F2F',
+                      bg='#1976D2', fg='white',
+                      activebackground='#1565C0',
                       cursor='hand2', relief=tk.RAISED, bd=4,
                       padx=30, pady=20, width=20, height=4)
-        btn_enviar.pack(side=tk.LEFT, padx=10)
+        self.btn_borradores.pack(side=tk.LEFT, padx=10)
         
         # Botón para abrir carpeta
         btn_abrir_carpeta = tk.Button(btn_frame, text="📁 ABRIR\nCARPETA\nDE PDFs", 
@@ -283,6 +319,14 @@ class AplicacionConsentimientos:
                               cursor='hand2', relief=tk.RAISED, bd=4,
                               padx=30, pady=20, width=20, height=4)
         btn_abrir_carpeta.pack(side=tk.LEFT, padx=10)
+
+        self.btn_enviar_borradores = tk.Button(
+            main_frame, text="📤 ENVIAR BORRADORES REVISADOS (Gmail)",
+            command=self.enviar_borradores_gmail, font=fuente_boton,
+            bg='#D32F2F', fg='white', activebackground='#B71C1C',
+            cursor='hand2', padx=20, pady=12,
+        )
+        self.btn_enviar_borradores.pack(pady=(0, 15))
         
         # Separador
         ttk.Separator(main_frame, orient='horizontal').pack(fill=tk.X, pady=10)
@@ -358,6 +402,32 @@ class AplicacionConsentimientos:
     def limpiar_log(self):
         """Limpia el área de log"""
         self.log_text.delete(1.0, tk.END)
+    
+    @staticmethod
+    def _parece_fecha(texto: str) -> bool:
+        """Detecta valores que son fechas/horas y no texto libre (ej. un país)"""
+        texto = texto.strip()
+        if not texto:
+            return False
+        # 2026-06-29 22:46:23.014000, 29/06/2026, 29-06-2026 22:46...
+        patrones = (
+            r'^\d{4}-\d{2}-\d{2}([ T]\d{2}:\d{2}(:\d{2}(\.\d+)?)?)?$',
+            r'^\d{1,2}[/-]\d{1,2}[/-]\d{2,4}([ T]\d{1,2}:\d{2}(:\d{2})?)?$',
+            r'^\d{1,2}:\d{2}(:\d{2})?$',
+        )
+        return any(re.match(p, texto) for p in patrones)
+    
+    def abrir_documentacion(self):
+        """Abre la guía de uso en el navegador"""
+        try:
+            webbrowser.open(URL_DOCUMENTACION)
+            self.agregar_log("✓ Guía de uso abierta en el navegador")
+        except Exception as e:
+            self.agregar_log(f"✗ No se pudo abrir la guía: {str(e)}")
+            messagebox.showerror(
+                "Error",
+                "No se pudo abrir el navegador. Abre esta dirección a mano: " + URL_DOCUMENTACION
+            )
     
     def _obtener_clave_encriptacion(self) -> bytes:
         """Obtiene una clave de encriptación basada en el usuario del sistema"""
@@ -443,8 +513,153 @@ class AplicacionConsentimientos:
             
         return True
         
+    @staticmethod
+    def _formatear_duracion(segundos):
+        minutos, segundos = divmod(max(0, ceil(segundos)), 60)
+        horas, minutos = divmod(minutos, 60)
+        if horas:
+            return f"{horas} h {minutos:02d} min {segundos:02d} s"
+        if minutos:
+            return f"{minutos} min {segundos:02d} s"
+        return f"{segundos} s"
+
+    def _cerrar_aplicacion(self):
+        if self._generando:
+            self.ventana_progreso.lift()
+            self.ventana_progreso.bell()
+            return
+        self.root.destroy()
+
+    def _crear_modal_progreso_pdf(self, titulo="Generando consentimientos en PDF"):
+        ventana = tk.Toplevel(self.root)
+        self.ventana_progreso = ventana
+        ventana.title(titulo)
+        ventana.transient(self.root)
+        ventana.resizable(False, False)
+        ventana.protocol("WM_DELETE_WINDOW", lambda: None)
+        frame = tk.Frame(ventana, bg='#ffffff', padx=24, pady=22)
+        frame.pack(fill=tk.BOTH, expand=True)
+        self.progreso_estado = tk.StringVar(master=ventana, value="Preparando generación…")
+        self.progreso_detalle = tk.StringVar(master=ventana)
+        self.progreso_tiempo = tk.StringVar(master=ventana)
+        tk.Label(frame, textvariable=self.progreso_estado, anchor=tk.W,
+                 font=('Segoe UI', 12, 'bold'), bg='#ffffff', fg='#333333',
+                 wraplength=630).pack(fill=tk.X)
+        self.barra_progreso = ttk.Progressbar(frame, mode='determinate', maximum=100, length=630)
+        self.barra_progreso.pack(fill=tk.X, pady=(16, 12))
+        tk.Label(frame, textvariable=self.progreso_detalle, anchor=tk.W,
+                 font=('Segoe UI', 10), bg='#ffffff', fg='#333333').pack(fill=tk.X)
+        tk.Label(frame, textvariable=self.progreso_tiempo, anchor=tk.W,
+                 font=('Segoe UI', 10), bg='#ffffff', fg='#666666',
+                 wraplength=630).pack(fill=tk.X, pady=(8, 0))
+        tk.Label(frame, text="Esta ventana se cerrará al terminar.", anchor=tk.W,
+                 font=('Segoe UI', 9), bg='#ffffff', fg='#666666').pack(fill=tk.X, pady=(14, 0))
+        ventana.update_idletasks()
+        x = max(0, self.root.winfo_x() + (self.root.winfo_width() - ventana.winfo_reqwidth()) // 2)
+        y = max(0, self.root.winfo_y() + (self.root.winfo_height() - ventana.winfo_reqheight()) // 2)
+        ventana.geometry(f"+{x}+{y}")
+        ventana.grab_set()
+
+    def _cerrar_modal_progreso_pdf(self):
+        self._generando = False
+        self.barra_progreso.stop()
+        if self.ventana_progreso is not None:
+            self.ventana_progreso.grab_release()
+            self.ventana_progreso.destroy()
+            self.ventana_progreso = None
+        self.btn_generar.configure(state=tk.NORMAL)
+        if hasattr(self, "btn_borradores"):
+            self.btn_borradores.configure(state=tk.NORMAL)
+        if hasattr(self, "btn_enviar_borradores"):
+            self.btn_enviar_borradores.configure(state=tk.NORMAL)
+
+    def _procesar_eventos_generacion(self):
+        """Tk consume los eventos en su propio hilo y mantiene activo el reloj."""
+        if not self._generando:
+            return
+        for _ in range(100):
+            try:
+                tipo, datos = self._eventos_generacion.get_nowait()
+            except Empty:
+                break
+            if tipo == "log":
+                self.agregar_log(datos)
+            elif tipo == "total":
+                self._iniciar_progreso_pdf(datos)
+            elif tipo == "progreso":
+                self._actualizar_progreso_pdf(**datos)
+            elif tipo == "resultado":
+                self._resultado_generacion = datos
+            elif tipo == "fin":
+                self._cerrar_modal_progreso_pdf()
+                if self._resultado_generacion:
+                    tipo_aviso, titulo, mensaje = self._resultado_generacion
+                    mostrar = messagebox.showerror if tipo_aviso == "error" else messagebox.showinfo
+                    mostrar(titulo, mensaje, parent=self.root)
+                return
+        self._actualizar_progreso_pdf()
+        self.root.after(100, self._procesar_eventos_generacion)
+
+    def _iniciar_progreso_pdf(self, total=0):
+        self._progreso_inicio = monotonic()
+        self._progreso_total = total
+        self._progreso_procesados = 0
+        self._progreso_generados = 0
+        self._progreso_errores = 0
+        self._progreso_fin_estimado = None
+        self._progreso_terminado = False
+        self._actualizar_progreso_pdf(estado="Preparando generación…")
+
+    def _actualizar_progreso_pdf(self, procesados=None, generados=None, errores=None,
+                                estado=None, terminado=False):
+        ahora = monotonic()
+        if procesados is not None and procesados > 0:
+            media = max(0, ahora - self._progreso_inicio) / procesados
+            self._progreso_fin_estimado = ahora + media * max(0, self._progreso_total - procesados)
+        if terminado:
+            self._progreso_terminado = True
+        if procesados is not None:
+            self._progreso_procesados = procesados
+        if generados is not None:
+            self._progreso_generados = generados
+        if errores is not None:
+            self._progreso_errores = errores
+        total = self._progreso_total
+        procesados = self._progreso_procesados
+        pendientes = max(0, total - procesados)
+        porcentaje = 100 * procesados / total if total else 0
+        self.barra_progreso.configure(value=porcentaje)
+        if estado:
+            self.progreso_estado.set(estado)
+        self.progreso_detalle.set(
+            f"{procesados} de {total} procesados ({porcentaje:.0f} %) · "
+            f"{self._progreso_generados} PDFs generados · "
+            f"{pendientes} pendientes · {self._progreso_errores} errores"
+            if total else "Leyendo los datos del Excel…"
+        )
+        transcurrido = max(0, ahora - self._progreso_inicio)
+        if self._progreso_terminado:
+            self.progreso_tiempo.set(f"Tiempo total: {self._formatear_duracion(transcurrido)}")
+            if not total:
+                self.progreso_detalle.set("No se ha generado ningún PDF.")
+        else:
+            if self._progreso_fin_estimado is None:
+                restante = "calculando tras el primer PDF…"
+            elif not pendientes:
+                restante = "finalizando…"
+            elif ahora >= self._progreso_fin_estimado:
+                restante = "recalculando…"
+            else:
+                restante = self._formatear_duracion(self._progreso_fin_estimado - ahora)
+            self.progreso_tiempo.set(
+                f"Transcurrido: {self._formatear_duracion(transcurrido)} · "
+                f"Tiempo restante estimado: {restante}"
+            )
+
     def generar_consentimientos(self):
         """Genera los consentimientos desde Excel y plantilla Word"""
+        if getattr(self, "_generando", False):
+            return
         if not self.validar_archivos():
             return
         
@@ -454,71 +669,118 @@ class AplicacionConsentimientos:
                                  "Selecciona el archivo Excel para configurar el mapeo.")
             return
             
+        self._crear_modal_progreso_pdf()
+        self._generando = True
+        self._iniciar_progreso_pdf()
+        self.btn_generar.configure(state=tk.DISABLED)
+        self._eventos_generacion = Queue()
+        self._resultado_generacion = None
+        configuracion = {
+            "archivo_excel": self.archivo_excel.get(),
+            "plantilla_word": self.plantilla_word.get(),
+            "carpeta_salida": self.carpeta_salida.get(),
+            "mapeo_campos": dict(self.mapeo_campos),
+            "valores_fijos": dict(self.valores_fijos),
+        }
+        self._hilo_generacion = Thread(
+            target=self._generar_consentimientos_trabajo,
+            args=(configuracion, self._eventos_generacion),
+            daemon=True,
+        )
+        try:
+            self._hilo_generacion.start()
+        except Exception as exc:
+            self._cerrar_modal_progreso_pdf()
+            messagebox.showerror("Error", f"No se pudo iniciar la generación: {exc}", parent=self.root)
+            return
+        self.root.after(100, self._procesar_eventos_generacion)
+
+    def _generar_consentimientos_trabajo(self, configuracion, eventos):
+        """Trabajo bloqueante: comunica resultados por cola, sin acceder a Tk."""
+        mapeo_campos = configuracion["mapeo_campos"]
+        valores_fijos = configuracion["valores_fijos"]
+
+        def log(mensaje):
+            eventos.put(("log", mensaje))
+
+        def progreso(**datos):
+            eventos.put(("progreso", datos))
+
+        def avisar(tipo, titulo, mensaje):
+            eventos.put(("resultado", (tipo, titulo, mensaje)))
+
         try:
             from modulos.lector_excel import LectorExcel
             from modulos.generador_word import GeneradorConsentimientos
+            from modulos.registro_consentimientos import RegistroConsentimientos
             import subprocess
             import time
             
-            self.agregar_log("=" * 80)
-            self.agregar_log("Iniciando proceso de generación de consentimientos en PDF...")
+            log("=" * 80)
+            log("Iniciando proceso de generación de consentimientos en PDF...")
             
             # Cerrar cualquier proceso de Word previo
-            self.agregar_log("Cerrando procesos previos de Word...")
+            log("Cerrando procesos previos de Word...")
             try:
                 subprocess.run(['taskkill', '/F', '/IM', 'WINWORD.EXE'], 
                              capture_output=True, timeout=3)
                 time.sleep(1)
-                self.agregar_log("✓ Procesos de Word cerrados")
+                log("✓ Procesos de Word cerrados")
             except:
                 pass
             
             # Crear carpeta de salida si no existe
-            carpeta_salida = Path(self.carpeta_salida.get())
+            carpeta_salida = Path(configuracion["carpeta_salida"])
             carpeta_salida.mkdir(parents=True, exist_ok=True)
             
-            # Limpiar todos los archivos de la carpeta
-            archivos_antiguos = [f for f in carpeta_salida.iterdir() if f.is_file()]
-            if archivos_antiguos:
-                self.agregar_log(f"🗑 Eliminando {len(archivos_antiguos)} archivos antiguos de la carpeta...")
-                for archivo in archivos_antiguos:
-                    try:
-                        archivo.unlink()
-                    except Exception as e:
-                        self.agregar_log(f"  ⚠ No se pudo eliminar {archivo.name}: {str(e)}")
-                self.agregar_log("✓ Carpeta limpiada")
+            # Invalidar el lote anterior; limpiar sus archivos tras validar el Excel.
+            registro_pdfs = RegistroConsentimientos(carpeta_salida)
+            registro_pdfs.iniciar([])
             
             # Leer datos del Excel
-            self.agregar_log(f"Leyendo datos de: {Path(self.archivo_excel.get()).name}")
-            lector = LectorExcel(self.archivo_excel.get())
+            log(f"Leyendo datos de: {Path(configuracion['archivo_excel']).name}")
+            lector = LectorExcel(configuracion["archivo_excel"])
             datos = lector.leer_datos()
             
-            self.agregar_log(f"✓ Se encontraron {len(datos)} registros en el Excel")
+            log(f"✓ Se encontraron {len(datos)} registros en el Excel")
             
             if not datos:
-                self.agregar_log("✗ Error: No hay datos en el Excel")
-                messagebox.showerror("Error", "No hay datos en el Excel")
+                log("✗ Error: No hay datos en el Excel")
+                progreso(estado="Sin registros para generar", terminado=True)
+                avisar("error", "Error", "No hay datos en el Excel")
                 return
+
+            progreso(estado="Eliminando PDFs y borradores anteriores…")
+            eliminados = registro_pdfs.iniciar(datos, limpiar_anteriores=True)
+            log(f"✓ Eliminados {eliminados} archivos del lote anterior (PDFs y borradores)")
             
             # Aplicar mapeo a los datos
-            self.agregar_log(f"Aplicando mapeo de campos: {len(self.mapeo_campos)} campos")
-            if self.valores_fijos:
-                self.agregar_log(f"Aplicando valores fijos: {len(self.valores_fijos)} campos")
+            log(f"Aplicando mapeo de campos: {len(mapeo_campos)} campos")
+            if valores_fijos:
+                log(f"Aplicando valores fijos: {len(valores_fijos)} campos")
             
             datos_mapeados = []
+            paises_descartados = set()
             for registro in datos:
                 registro_nuevo = {}
                 
                 # Primero aplicar mapeo desde Excel
-                for campo_plantilla, columna_excel in self.mapeo_campos.items():
+                for campo_plantilla, columna_excel in mapeo_campos.items():
                     if columna_excel in registro:
                         valor = registro[columna_excel]
                         registro_nuevo[campo_plantilla] = valor
                 
                 # Luego aplicar valores fijos (solo si no se mapearon desde Excel)
-                for campo, valor_fijo in self.valores_fijos.items():
+                for campo, valor_fijo in valores_fijos.items():
                     if campo not in registro_nuevo:
                         registro_nuevo[campo] = valor_fijo
+                
+                # El pais nunca puede quedar vacio ni venir de una columna de fecha
+                pais = str(registro_nuevo.get('pais_deudor', '')).strip()
+                if not pais or self._parece_fecha(pais):
+                    if pais:
+                        paises_descartados.add(pais)
+                    registro_nuevo['pais_deudor'] = PAIS_POR_DEFECTO
                 
                 # Crear referencia_orden combinando nombre y apellido del alumno
                 nombre_alumno = registro_nuevo.get('nombre_alumno', '')
@@ -545,17 +807,23 @@ class AplicacionConsentimientos:
                 
                 datos_mapeados.append(registro_nuevo)
             
+            if paises_descartados:
+                ejemplo = next(iter(paises_descartados))
+                log(f"⚠ El campo 'País del deudor' recibía valores no válidos (ej: {ejemplo})")
+                log(f"  Se ha usado '{PAIS_POR_DEFECTO}'. Revisa el mapeo si no es correcto.")
+            
             # Determinar tamaño de lote óptimo
             TAMANO_LOTE = 10
             total_registros = len(datos_mapeados)
+            eventos.put(("total", total_registros))
             num_lotes = (total_registros + TAMANO_LOTE - 1) // TAMANO_LOTE
             
             if total_registros > TAMANO_LOTE:
-                self.agregar_log(f"📦 Procesamiento en lotes de {TAMANO_LOTE} registros")
-                self.agregar_log(f"   Total de lotes: {num_lotes}")
+                log(f"📦 Procesamiento en lotes de {TAMANO_LOTE} registros")
+                log(f"   Total de lotes: {num_lotes}")
             
             # Generar consentimientos
-            generador = GeneradorConsentimientos(self.plantilla_word.get(), 
+            generador = GeneradorConsentimientos(configuracion["plantilla_word"], 
                                                 str(carpeta_salida))
             
             consentimientos_generados = []
@@ -567,21 +835,28 @@ class AplicacionConsentimientos:
                 registros_lote = datos_mapeados[inicio_lote:fin_lote]
                 
                 if num_lotes > 1:
-                    self.agregar_log(f"\n📦 LOTE {lote_num + 1}/{num_lotes} - Registros {inicio_lote + 1} a {fin_lote}")
+                    log(f"\n📦 LOTE {lote_num + 1}/{num_lotes} - Registros {inicio_lote + 1} a {fin_lote}")
                 
                 # Procesar registros del lote
                 for i, registro in enumerate(registros_lote, inicio_lote + 1):
+                    progreso(estado=f"Generando PDF {i} de {total_registros}…")
                     try:
                         archivo_generado = generador.generar_consentimiento(registro)
+                        registro_pdfs.agregar(i, datos[i - 1], archivo_generado)
                         consentimientos_generados.append(archivo_generado)
-                        self.agregar_log(f"  [{i}/{total_registros}] ✓ Generado: {Path(archivo_generado).name}")
+                        log(f"  [{i}/{total_registros}] ✓ Generado: {Path(archivo_generado).name}")
                     except Exception as e:
                         errores += 1
-                        self.agregar_log(f"  [{i}/{total_registros}] ✗ Error: {str(e)}")
+                        log(f"  [{i}/{total_registros}] ✗ Error: {str(e)}")
+                    progreso(
+                        procesados=i, generados=len(consentimientos_generados), errores=errores,
+                        estado=f"Procesados {i} de {total_registros} registros"
+                    )
                 
                 # Pausa entre lotes para dar tiempo a Word
                 if lote_num < num_lotes - 1:  # No pausar después del último lote
-                    self.agregar_log(f"   ⏸ Pausa de 3 segundos antes del siguiente lote...")
+                    progreso(estado="Pausa entre lotes: preparando los siguientes PDFs…")
+                    log(f"   ⏸ Pausa de 3 segundos antes del siguiente lote...")
                     # Cerrar procesos de Word para limpiar
                     try:
                         subprocess.run(['taskkill', '/F', '/IM', 'WINWORD.EXE'], 
@@ -590,31 +865,46 @@ class AplicacionConsentimientos:
                         pass
                     time.sleep(3)
             
+            registro_pdfs.finalizar()
+            if errores:
+                log("✗ Borradores bloqueados: vuelve a generar el lote completo sin errores.")
+
             # Limpieza final de Word
-            self.agregar_log("🧹 Limpieza final de procesos de Word...")
+            progreso(estado="Finalizando generación…")
+            log("🧹 Limpieza final de procesos de Word...")
             try:
                 subprocess.run(['taskkill', '/F', '/IM', 'WINWORD.EXE'], 
                              capture_output=True, timeout=2)
             except:
                 pass
             
-            self.agregar_log("=" * 80)
-            self.agregar_log(f"RESUMEN: {len(consentimientos_generados)} consentimientos generados correctamente")
+            log("=" * 80)
+            log(f"RESUMEN: {len(consentimientos_generados)} consentimientos generados correctamente")
             if errores > 0:
-                self.agregar_log(f"ADVERTENCIA: {errores} registros con errores")
+                log(f"ADVERTENCIA: {errores} registros con errores")
+
+            progreso(
+                estado=(f"Finalizado con {errores} errores. La creación de borradores está bloqueada."
+                        if errores else "Todos los PDFs se han generado correctamente"),
+                terminado=True,
+            )
             
-            messagebox.showinfo("Completado", 
+            avisar("info", "Completado", 
                               f"Se generaron {len(consentimientos_generados)} consentimientos en PDF\n"
                               f"Carpeta: {carpeta_salida}")
             
         except ImportError as e:
-            self.agregar_log(f"✗ Error: Módulos no encontrados - {str(e)}")
-            messagebox.showerror("Error", 
+            progreso(estado="Generación interrumpida: faltan módulos", terminado=True)
+            log(f"✗ Error: Módulos no encontrados - {str(e)}")
+            avisar("error", "Error", 
                                "Faltan módulos necesarios. Asegúrese de instalar:\n"
                                "pip install openpyxl python-docx")
         except Exception as e:
-            self.agregar_log(f"✗ Error: {str(e)}")
-            messagebox.showerror("Error", f"Error al generar consentimientos:\n{str(e)}")
+            progreso(estado="Generación interrumpida por un error", terminado=True)
+            log(f"✗ Error: {str(e)}")
+            avisar("error", "Error", f"Error al generar consentimientos:\n{str(e)}")
+        finally:
+            eventos.put(("fin", None))
             
     def preparar_emails(self):
         """Abre ventana para configurar asunto y cuerpo del email"""
@@ -644,7 +934,7 @@ class AplicacionConsentimientos:
         titulo.pack(pady=(0, 20))
         
         instruccion = tk.Label(frame,
-                             text="Esta configuración se guardará y se usará para generar los borradores.",
+                             text="Configura el texto y revisa la lista de adjuntos antes de crear los borradores en Gmail.",
                              font=('Arial', 10),
                              bg='#f5f5f5', fg='#555')
         instruccion.pack(pady=(0, 15))
@@ -723,7 +1013,7 @@ Gfg Kids"""
                 from modulos.preparador_emails import PreparadorEmails
                 
                 self.agregar_log("=" * 80)
-                self.agregar_log("Preparando borradores de emails...")
+                self.agregar_log("Preparando la lista de correos y adjuntos...")
                 
                 preparador = PreparadorEmails(str(carpeta_salida))
                 resultado = preparador.crear_borradores_email(
@@ -732,13 +1022,13 @@ Gfg Kids"""
                     cuerpo_personalizado=cuerpo
                 )
                 
-                self.agregar_log(f"✓ Se prepararon {len(resultado)} borradores de email")
+                self.agregar_log(f"✓ Se prepararon {len(resultado)} correos para revisión")
                 self.agregar_log(f"✓ Archivo 'emails_para_enviar.txt' generado")
                 self.agregar_log(f"✓ Archivo 'emails_lista.csv' generado")
                 
                 messagebox.showinfo("Completado", 
-                                  f"Se prepararon {len(resultado)} borradores\n"
-                                  "Revise los archivos en la carpeta de salida")
+                                  f"Se prepararon {len(resultado)} correos para revisión\n"
+                                  "Revisa la lista y pulsa Crear borradores (Gmail)")
                 
             except ImportError:
                 self.agregar_log("✗ Error: Módulo preparador_emails no encontrado")
@@ -747,7 +1037,7 @@ Gfg Kids"""
                 self.agregar_log(f"✗ Error: {str(e)}")
                 messagebox.showerror("Error", f"Error al preparar emails:\n{str(e)}")
         
-        btn_generar = tk.Button(btn_frame, text="✓ Guardar y Generar Borradores",
+        btn_generar = tk.Button(btn_frame, text="✓ Guardar y preparar revisión",
                               command=generar_borradores_emails,
                               font=('Arial', 12, 'bold'),
                               bg='#4CAF50', fg='white',
@@ -765,67 +1055,248 @@ Gfg Kids"""
                                padx=30, pady=10)
         btn_cancelar.pack(side=tk.LEFT, padx=10)
 
-    def enviar_emails_gmail(self):
-        """Envía los emails por Gmail usando la cuenta indicada"""
-        carpeta_salida = Path(self.carpeta_salida.get())
-
-        if not carpeta_salida.exists():
-            messagebox.showerror("Error", "No hay consentimientos generados")
+    def crear_borradores_gmail(self):
+        """Crea borradores revisables en Gmail, sin posibilidad de envío directo."""
+        if self._generando:
             return
-
-        gmail_usuario = self.gmail_usuario.get().strip()
-        gmail_app_password = self.gmail_app_password.get().strip()
-        nombre_remitente = self.gmail_nombre_remitente.get().strip()
-
-        if not gmail_usuario or not gmail_app_password:
-            messagebox.showwarning(
-                "Datos incompletos",
-                "Indica el correo Gmail y la contraseña de aplicación para poder enviar."
-            )
+        usuario = self.gmail_usuario.get().strip()
+        clave = self.gmail_app_password.get().strip()
+        if not usuario or not clave:
+            messagebox.showwarning("Datos incompletos", "Indica la cuenta Gmail y su contraseña de aplicación.")
             return
-        
-        # Guardar configuración para próxima vez
+        if not self.archivo_excel.get() or not Path(self.carpeta_salida.get()).exists():
+            messagebox.showerror("Faltan datos", "Selecciona el Excel y genera primero los PDFs.")
+            return
         self._guardar_config()
-
-        confirmar = messagebox.askyesno(
-            "Confirmar envío",
-            "¿Deseas enviar los emails ahora desde la cuenta indicada?"
+        configuracion = {
+            "ruta_excel": self.archivo_excel.get(), "gmail_usuario": usuario,
+            "gmail_app_password": clave,
+            "nombre_remitente": self.gmail_nombre_remitente.get().strip() or None,
+            "asunto_base": self.email_asunto.get(), "cuerpo_personalizado": self.email_cuerpo,
+        }
+        carpeta = self.carpeta_salida.get()
+        self._crear_modal_progreso_pdf(titulo="Creando borradores en Gmail")
+        self._generando = True
+        self.btn_generar.configure(state=tk.DISABLED)
+        self.btn_borradores.configure(state=tk.DISABLED)
+        self.progreso_estado.set("Verificando destinatarios y PDFs…")
+        self.progreso_detalle.set("Los mensajes se guardarán en Borradores de Gmail para que los revises.")
+        self.progreso_tiempo.set("Transcurrido: 0 s")
+        self.barra_progreso.configure(mode="indeterminate")
+        self.barra_progreso.start(15)
+        self._inicio_borradores = monotonic()
+        self._eventos_borradores = Queue()
+        self._resultado_borradores = None
+        self._error_borradores = None
+        self._hilo_borradores = Thread(
+            target=self._crear_borradores_trabajo,
+            args=(carpeta, configuracion, self._eventos_borradores), daemon=True,
         )
-        if not confirmar:
+        try:
+            self._hilo_borradores.start()
+        except Exception as exc:
+            self._cerrar_modal_progreso_pdf()
+            messagebox.showerror("Error", f"No se pudo iniciar la creación de borradores: {exc}")
             return
+        self.root.after(100, self._procesar_eventos_borradores)
 
+    @staticmethod
+    def _crear_borradores_trabajo(carpeta, configuracion, eventos):
         try:
             from modulos.preparador_emails import PreparadorEmails
-
-            self.agregar_log("=" * 80)
-            self.agregar_log("Enviando emails por Gmail...")
-
-            preparador = PreparadorEmails(str(carpeta_salida))
-            resultado = preparador.enviar_emails_gmail(
-                self.archivo_excel.get(),
-                gmail_usuario,
-                gmail_app_password,
-                nombre_remitente=nombre_remitente or None,
-                asunto_base=self.email_asunto.get(),
-                cuerpo_personalizado=self.email_cuerpo,
+            resultado = PreparadorEmails(carpeta).crear_borradores_gmail(
+                **configuracion,
+                progreso=lambda *datos: eventos.put(("progreso", datos)),
             )
+            eventos.put(("resultado", resultado))
+        except Exception as exc:
+            eventos.put(("error", str(exc)))
+        finally:
+            eventos.put(("fin", None))
 
-            self.agregar_log(f"✓ Enviados: {resultado['enviados']} / {resultado['total']}")
-            if resultado["fallidos"]:
-                self.agregar_log(f"✗ Fallidos: {len(resultado['fallidos'])}")
-                for fallo in resultado["fallidos"][:10]:
-                    self.agregar_log(f"  - #{fallo['numero']} {fallo['email']}: {fallo['motivo']}")
+    def _procesar_eventos_borradores(self):
+        if not self._generando:
+            return
+        for _ in range(100):
+            try:
+                tipo, datos = self._eventos_borradores.get_nowait()
+            except Empty:
+                break
+            if tipo == "progreso":
+                procesados, total, creados, existentes = datos
+                self.barra_progreso.stop()
+                self.barra_progreso.configure(mode="determinate", value=100 * procesados / total if total else 0)
+                self.progreso_estado.set("Conectando con Gmail…" if not procesados else "Guardando borradores en Gmail…")
+                self.progreso_detalle.set(
+                    f"{procesados} de {total} revisados · {creados} creados · "
+                    f"{existentes} ya existentes · {total - procesados} pendientes"
+                )
+            elif tipo == "resultado":
+                self._resultado_borradores = datos
+            elif tipo == "error":
+                self._error_borradores = datos
+            elif tipo == "fin":
+                self._cerrar_modal_progreso_pdf()
+                if self._error_borradores:
+                    self.agregar_log(f"✗ Error al crear borradores: {self._error_borradores}")
+                    messagebox.showerror("Error al crear borradores", self._error_borradores, parent=self.root)
+                else:
+                    resultado = self._resultado_borradores
+                    resumen = (f"Creados: {resultado['creados']}\n"
+                               f"Ya existentes en Borradores: {resultado['existentes']}\n"
+                               f"Sin confirmar: {len(resultado['fallidos'])}\n"
+                               f"Pendientes: {resultado['pendientes']}")
+                    self.agregar_log(resumen.replace("\n", " · "))
+                    for fallo in resultado["fallidos"]:
+                        self.agregar_log(f"  #{fallo['numero']} {fallo['email']}: {fallo['motivo']}")
+                    aviso = messagebox.showwarning if resultado["fallidos"] else messagebox.showinfo
+                    aviso("Borradores en Gmail", resumen + "\n\nAbre Gmail → Borradores. "
+                          "Comprueba cada destinatario y PDF; después vuelve a la app y pulsa "
+                          "Enviar borradores revisados.\nEl programa no ha enviado ningún correo.", parent=self.root)
+                return
+        self.progreso_tiempo.set(f"Transcurrido: {self._formatear_duracion(monotonic() - self._inicio_borradores)}")
+        self.root.after(100, self._procesar_eventos_borradores)
 
-            messagebox.showinfo(
-                "Envío completado",
-                f"Enviados: {resultado['enviados']}\n"
-                f"Fallidos: {len(resultado['fallidos'])}"
-            )
+    def enviar_borradores_gmail(self):
+        if self._generando:
+            return
+        usuario = self.gmail_usuario.get().strip()
+        clave = self.gmail_app_password.get().strip()
+        if not usuario or not clave or not self.archivo_excel.get():
+            messagebox.showwarning("Faltan datos", "Selecciona el Excel e indica la cuenta Gmail y su contraseña de aplicación.")
+            return
+        configuracion = {
+            "ruta_excel": self.archivo_excel.get(), "gmail_usuario": usuario,
+            "gmail_app_password": clave, "nombre_remitente": self.gmail_nombre_remitente.get().strip() or None,
+            "asunto_base": self.email_asunto.get(), "cuerpo_personalizado": self.email_cuerpo,
+        }
+        self._iniciar_operacion_envio(self.carpeta_salida.get(), configuracion)
 
-        except Exception as e:
-            self.agregar_log(f"✗ Error al enviar emails: {str(e)}")
-            messagebox.showerror("Error", f"Error al enviar emails:\n{str(e)}")
-    
+    def _iniciar_operacion_envio(self, carpeta, configuracion, plan=None):
+        self._crear_modal_progreso_pdf(
+            titulo="Comprobando borradores en Gmail" if plan is None else "Enviando borradores revisados"
+        )
+        self._generando = True
+        for boton in (self.btn_generar, self.btn_borradores, self.btn_enviar_borradores):
+            boton.configure(state=tk.DISABLED)
+        self.progreso_estado.set("Leyendo y verificando los borradores…" if plan is None else "Verificando de nuevo antes de enviar…")
+        self.progreso_detalle.set("Solo se procesan los borradores correspondientes al lote actual.")
+        self.progreso_tiempo.set("Transcurrido: 0 s")
+        self.barra_progreso.configure(mode="indeterminate")
+        self.barra_progreso.start(15)
+        self._inicio_envio = monotonic()
+        self._eventos_envio = Queue()
+        self._resultado_envio = None
+        self._error_envio = None
+        self._contexto_envio = (carpeta, configuracion, plan is None)
+        self._hilo_envio = Thread(target=self._trabajo_envio,
+                                  args=(carpeta, configuracion, plan, self._eventos_envio), daemon=True)
+        try:
+            self._hilo_envio.start()
+        except Exception as exc:
+            self._cerrar_modal_progreso_pdf()
+            messagebox.showerror("Error", str(exc), parent=self.root)
+            return
+        self.root.after(100, self._procesar_eventos_envio)
+
+    @staticmethod
+    def _trabajo_envio(carpeta, configuracion, plan, eventos):
+        try:
+            from modulos.envio_borradores import EnviadorBorradores
+            servicio = EnviadorBorradores(carpeta)
+            progreso = lambda *datos: eventos.put(("progreso", datos))
+            resultado = (servicio.preparar_envio(configuracion, progreso) if plan is None
+                         else servicio.enviar(plan, configuracion, progreso))
+            eventos.put(("resultado", resultado))
+        except Exception as exc:
+            eventos.put(("error", str(exc)))
+        finally:
+            eventos.put(("fin", None))
+
+    def _procesar_eventos_envio(self):
+        if not self._generando:
+            return
+        carpeta, configuracion, es_revision = self._contexto_envio
+        for _ in range(100):
+            try:
+                tipo, datos = self._eventos_envio.get_nowait()
+            except Empty:
+                break
+            if tipo == "progreso":
+                actual, total = datos
+                self.barra_progreso.stop()
+                self.barra_progreso.configure(mode="determinate", value=100 * actual / total if total else 0)
+                self.progreso_estado.set("Comprobando borradores…" if es_revision else "Enviando borradores revisados…")
+                self.progreso_detalle.set(f"{actual} de {total} procesados")
+            elif tipo == "resultado":
+                self._resultado_envio = datos
+            elif tipo == "error":
+                self._error_envio = datos
+            elif tipo == "fin":
+                self._cerrar_modal_progreso_pdf()
+                if self._error_envio:
+                    self.agregar_log(f"✗ Borradores: {self._error_envio}")
+                    messagebox.showerror("No se pudo completar la operación", self._error_envio, parent=self.root)
+                elif es_revision:
+                    self._mostrar_confirmacion_borradores(self._resultado_envio, carpeta, configuracion)
+                else:
+                    r = self._resultado_envio
+                    texto = (f"Enviados: {r['enviados']}\nYa enviados anteriormente: {r['omitidos']}\n"
+                             f"Pendientes: {r['pendientes']}")
+                    detalles = r["errores"] + r["avisos"]
+                    if detalles:
+                        texto += "\n\n" + "\n".join(detalles)
+                    self.agregar_log(texto)
+                    mostrar = messagebox.showwarning if detalles else messagebox.showinfo
+                    mostrar("Resultado del envío", texto, parent=self.root)
+                return
+        self.progreso_tiempo.set(f"Transcurrido: {self._formatear_duracion(monotonic() - self._inicio_envio)}")
+        self.root.after(100, self._procesar_eventos_envio)
+
+    def _mostrar_confirmacion_borradores(self, plan, carpeta, configuracion):
+        if not plan["mensajes"]:
+            messagebox.showinfo("Sin envíos pendientes", "Los correos de este lote ya constan como enviados.", parent=self.root)
+            return
+        ventana = tk.Toplevel(self.root)
+        self.ventana_progreso = ventana
+        self._generando = True
+        ventana.title("Confirmar envío de borradores revisados")
+        ventana.geometry("900x480")
+        ventana.transient(self.root)
+        ventana.grab_set()
+        marco = ttk.Frame(ventana, padding=18)
+        marco.pack(fill=tk.BOTH, expand=True)
+        ttk.Label(marco, text=f"Se enviarán {len(plan['mensajes'])} borradores desde {plan['cuenta']}.",
+                  font=('Segoe UI', 12, 'bold')).pack(anchor=tk.W)
+        ttk.Label(marco, text="Confirma después de revisar sus destinatarios y PDFs en Gmail.").pack(anchor=tk.W, pady=(6, 12))
+        tabla = ttk.Treeview(marco, columns=("destino", "asunto", "pdf"), show="headings", height=12)
+        for clave, titulo, ancho in (("destino", "Destinatario", 220), ("asunto", "Asunto en Gmail", 240), ("pdf", "PDF adjunto", 360)):
+            tabla.heading(clave, text=titulo)
+            tabla.column(clave, width=ancho)
+        barra = ttk.Scrollbar(marco, orient="vertical", command=tabla.yview)
+        tabla.configure(yscrollcommand=barra.set)
+        barra.pack(side=tk.RIGHT, fill=tk.Y)
+        tabla.pack(fill=tk.BOTH, expand=True)
+        for item in plan["mensajes"]:
+            tabla.insert("", tk.END, values=(item["email"], item["asunto"], item["archivo"]))
+
+        def cerrar():
+            ventana.grab_release()
+            ventana.destroy()
+            self.ventana_progreso = None
+            self._generando = False
+
+        def confirmar():
+            cerrar()
+            self._iniciar_operacion_envio(carpeta, configuracion, plan)
+
+        ventana.protocol("WM_DELETE_WINDOW", cerrar)
+        acciones = ttk.Frame(marco)
+        acciones.pack(fill=tk.X, pady=(15, 0))
+        ttk.Button(acciones, text="Cancelar", command=cerrar).pack(side=tk.LEFT)
+        ttk.Button(acciones, text=f"Enviar los {len(plan['mensajes'])} borradores revisados",
+                   command=confirmar).pack(side=tk.RIGHT)
+
     def abrir_carpeta_salida(self):
         """Abre la carpeta donde se guardaron los PDFs"""
         carpeta_salida = Path(self.carpeta_salida.get())
@@ -1132,7 +1603,12 @@ Gfg Kids"""
                 mejor_puntuacion = 0
                 
                 for columna in columnas_excel:
-                    columna_lower = columna.lower()
+                    columna_lower = str(columna).lower()
+                    
+                    # Las columnas de marca temporal no son datos del deudor
+                    if any(marca in columna_lower for marca in COLUMNAS_MARCA_TEMPORAL):
+                        continue
+                    
                     puntuacion = 0
                     
                     # Verificar palabras clave específicas del campo

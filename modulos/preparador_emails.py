@@ -4,11 +4,15 @@ Módulo para preparar emails con consentimientos adjuntos
 
 from pathlib import Path
 from typing import List, Dict, Optional
-import openpyxl
-import mimetypes
-import smtplib
+import re
+import imaplib
+import hashlib
+import json
 import ssl
 from email.message import EmailMessage
+from email import policy
+from email.utils import formatdate, formataddr
+from modulos.registro_consentimientos import RegistroConsentimientos
 
 
 class PreparadorEmails:
@@ -42,8 +46,8 @@ class PreparadorEmails:
         lector = LectorExcel(ruta_excel)
         datos = lector.leer_datos()
         
-        # Obtener lista de archivos PDF generados
-        archivos_generados = list(self.carpeta_consentimientos.glob("*.pdf"))
+        archivos_generados = RegistroConsentimientos(self.carpeta_consentimientos).validar(datos)
+        emails = [self._encontrar_email(registro) for registro in datos]
         
         # Crear borradores
         borradores = []
@@ -51,20 +55,20 @@ class PreparadorEmails:
         
         with open(archivo_salida, 'w', encoding='utf-8') as f:
             f.write("=" * 80 + "\n")
-            f.write("BORRADORES DE EMAILS PARA ENVÍO DE CONSENTIMIENTOS (PDF)\n")
+            f.write("REVISIÓN DE CORREOS Y ADJUNTOS (PDF)\n")
             f.write(f"Generado: {Path(ruta_excel).name}\n")
             f.write("=" * 80 + "\n\n")
             
             for i, registro in enumerate(datos, 1):
                 # Buscar email en el registro
-                email = self._encontrar_email(registro)
+                email = emails[i - 1]
                 nombre = self._encontrar_nombre(registro)
                 
                 # Buscar archivo de consentimiento correspondiente
-                archivo_consentimiento = self._encontrar_consentimiento(registro, archivos_generados)
+                archivo_consentimiento = archivos_generados[i - 1]["archivo"]
                 
                 # Generar asunto
-                asunto = f"{asunto_base} - {nombre}" if nombre else asunto_base
+                asunto = asunto_base or "Consentimiento"
                 
                 # Generar cuerpo
                 if cuerpo_personalizado:
@@ -99,110 +103,143 @@ class PreparadorEmails:
         
         return borradores
 
-    def enviar_emails_gmail(
-        self,
-        ruta_excel: str,
-        gmail_usuario: str,
-        gmail_app_password: str,
-        nombre_remitente: Optional[str] = None,
-        asunto_base: str = "Consentimiento",
-        cuerpo_personalizado: str = None,
+    def crear_borradores_gmail(
+        self, ruta_excel: str, gmail_usuario: str, gmail_app_password: str,
+        nombre_remitente: Optional[str] = None, asunto_base: str = "Consentimiento",
+        cuerpo_personalizado: str = None, progreso=None,
     ) -> Dict:
-        """
-        Envía emails reales usando Gmail SMTP con los consentimientos adjuntos.
+        from modulos.envio_borradores import bloquear_lote
+        with bloquear_lote(self.carpeta_consentimientos):
+            return self._crear_borradores_gmail(
+                ruta_excel, gmail_usuario, gmail_app_password, nombre_remitente,
+                asunto_base, cuerpo_personalizado, progreso,
+            )
 
-        Requiere contraseña de aplicación (App Password) de Gmail.
-
-        Args:
-            ruta_excel: Ruta al archivo Excel con los datos
-            gmail_usuario: Cuenta Gmail desde la que se enviarán los correos
-            gmail_app_password: Contraseña de aplicación de Gmail
-            nombre_remitente: Nombre visible del remitente (opcional)
-            asunto_base: Texto base del asunto
-            cuerpo_personalizado: Cuerpo personalizado del email (si None, usa el por defecto)
-
-        Returns:
-            Diccionario con resumen de enviados y fallidos
-        """
+    def _crear_borradores_gmail(
+        self, ruta_excel, gmail_usuario, gmail_app_password, nombre_remitente,
+        asunto_base, cuerpo_personalizado, progreso,
+    ):
+        """Guarda mensajes con adjunto en Borradores mediante IMAP; nunca los envía."""
         if not gmail_usuario or not gmail_app_password:
-            raise Exception("Debe indicar usuario Gmail y contraseña de aplicación")
+            raise ValueError("Indica la cuenta Gmail y su contraseña de aplicación.")
+        mensajes = self._preparar_mensajes(
+            ruta_excel, gmail_usuario, nombre_remitente, asunto_base, cuerpo_personalizado
+        )
+        from modulos.envio_borradores import HistorialBorradores
+        historial = HistorialBorradores(self.carpeta_consentimientos, gmail_usuario)
+        historial.comprobar_creacion(mensajes)
+        # Serializar el lote completo antes de realizar cualquier escritura remota.
+        contenidos = [mensaje.as_bytes() for mensaje in mensajes]
+        resultado = {"total": len(mensajes), "creados": 0, "existentes": 0,
+                     "fallidos": [], "pendientes": len(mensajes)}
+        if progreso:
+            progreso(0, len(mensajes), 0, 0)
+        with imaplib.IMAP4_SSL("imap.gmail.com", 993, ssl_context=ssl.create_default_context(),
+                             timeout=30) as servidor:
+            servidor.login(gmail_usuario, gmail_app_password)
+            carpeta = self._carpeta_borradores(servidor)
+            estado, _ = servidor.select(carpeta, readonly=True)
+            if estado != "OK":
+                raise ValueError("Gmail no permite consultar su carpeta Borradores.")
+            for i, (mensaje, contenido) in enumerate(zip(mensajes, contenidos), 1):
+                try:
+                    # Un reintento no duplica un borrador que ya esté en esa carpeta.
+                    estado, coincidencias = servidor.uid(
+                        "SEARCH", None, "HEADER", "Message-ID", f'"{mensaje["Message-ID"]}"'
+                    )
+                    if estado != "OK":
+                        raise ValueError("No se pudo comprobar si el borrador ya existe.")
+                    if any(dato.strip() for dato in (coincidencias or []) if isinstance(dato, bytes)):
+                        resultado["existentes"] += 1
+                    else:
+                        estado, _ = servidor.append(carpeta, r"(\Draft)", None, contenido)
+                        if estado != "OK":
+                            raise ValueError("Gmail no confirmó la creación del borrador.")
+                        resultado["creados"] += 1
+                    historial.registrar(mensaje)
+                    resultado["pendientes"] = len(mensajes) - i
+                    if progreso:
+                        progreso(i, len(mensajes), resultado["creados"], resultado["existentes"])
+                except (imaplib.IMAP4.error, OSError, ValueError) as exc:
+                    resultado["fallidos"].append({
+                        "numero": i, "email": str(mensaje["To"]),
+                        "motivo": f"{str(exc)[:200]} Revisa Borradores en Gmail antes de reintentar.",
+                    })
+                    resultado["pendientes"] = len(mensajes) - i
+                    # Una pérdida de conexión puede ocurrir después de guardar el mensaje.
+                    # Se detiene el lote sin reintentos automáticos.
+                    break
+        return resultado
 
+    @staticmethod
+    def _carpeta_borradores(servidor):
+        """Detecta la carpeta por su atributo IMAP, independientemente del idioma."""
+        estado, carpetas = servidor.list()
+        if estado != "OK":
+            raise ValueError("No se pudieron consultar las carpetas de Gmail.")
+        encontradas = []
+        for linea in carpetas or []:
+            if not isinstance(linea, bytes):
+                continue
+            partes = re.fullmatch(rb'\(([^)]*)\)\s+(?:"(?:[^"\\]|\\.)*"|NIL)\s+(.+)', linea)
+            if partes and b"\\drafts" in partes[1].lower().split():
+                encontradas.append(partes[2])
+        if len(encontradas) != 1:
+            raise ValueError("No se ha identificado una única carpeta Borradores en Gmail.")
+        return encontradas[0]
+
+    def _preparar_mensajes(self, ruta_excel, gmail_usuario, nombre_remitente=None,
+                           asunto_base="Consentimiento", cuerpo_personalizado=None):
         from modulos.lector_excel import LectorExcel
 
         lector = LectorExcel(ruta_excel)
         datos = lector.leer_datos()
 
-        archivos_generados = list(self.carpeta_consentimientos.glob("*.pdf"))
+        # Validar y cargar todos los adjuntos antes de conectar con Gmail.
+        # El borrador conserva los mismos bytes verificados.
+        archivos_generados = RegistroConsentimientos(self.carpeta_consentimientos).validar(datos)
+        mensajes = []
+        for i, registro in enumerate(datos, 1):
+            email_destino = self._encontrar_email(registro)
+            nombre = self._encontrar_nombre(registro)
+            adjunto = archivos_generados[i - 1]
+            cuerpo = (cuerpo_personalizado.replace("{nombre}", nombre)
+                      if cuerpo_personalizado else self._generar_cuerpo_email(nombre))
+            mensaje = EmailMessage(policy=policy.SMTP)
+            mensaje["From"] = formataddr((nombre_remitente or "", gmail_usuario))
+            mensaje["To"] = email_destino
+            mensaje["Subject"] = asunto_base or "Consentimiento"
+            mensaje.set_content(cuerpo)
+            mensaje.add_attachment(
+                adjunto["contenido"], maintype="application", subtype="pdf",
+                filename=Path(adjunto["archivo"]).name,
+            )
+            identidad = json.dumps({
+                "remitente": str(mensaje["From"]), "destino": email_destino,
+                "asunto": str(mensaje["Subject"]), "cuerpo": cuerpo,
+                "archivo": Path(adjunto["archivo"]).name,
+                "sha256": hashlib.sha256(adjunto["contenido"]).hexdigest(),
+            }, sort_keys=True, ensure_ascii=False).encode("utf-8")
+            mensaje["Message-ID"] = f"<sepas-{hashlib.sha256(identidad).hexdigest()}@borradores.local>"
+            mensaje["Date"] = formatdate(localtime=True)
+            mensajes.append(mensaje)
 
-        enviados = 0
-        fallidos = []
+        return mensajes
 
-        contexto_ssl = ssl.create_default_context()
-
-        with smtplib.SMTP_SSL("smtp.gmail.com", 465, context=contexto_ssl) as server:
-            server.login(gmail_usuario, gmail_app_password)
-
-            for i, registro in enumerate(datos, 1):
-                email_destino = self._encontrar_email(registro)
-                nombre = self._encontrar_nombre(registro)
-                archivo_consentimiento = self._encontrar_consentimiento(registro, archivos_generados)
-
-                if not email_destino or "@" not in email_destino:
-                    fallidos.append({"numero": i, "email": email_destino, "motivo": "Email inválido"})
-                    continue
-
-                if not archivo_consentimiento:
-                    fallidos.append({"numero": i, "email": email_destino, "motivo": "PDF no encontrado"})
-                    continue
-
-                asunto = f"{asunto_base}" if asunto_base else "Consentimiento"
-                
-                # Generar cuerpo personalizado
-                if cuerpo_personalizado:
-                    cuerpo = cuerpo_personalizado.replace("{nombre}", nombre)
-                else:
-                    cuerpo = self._generar_cuerpo_email(nombre)
-
-                mensaje = EmailMessage()
-                if nombre_remitente:
-                    mensaje["From"] = f"{nombre_remitente} <{gmail_usuario}>"
-                else:
-                    mensaje["From"] = gmail_usuario
-                mensaje["To"] = email_destino
-                mensaje["Subject"] = asunto
-                mensaje.set_content(cuerpo)
-
-                tipo_mime, _ = mimetypes.guess_type(archivo_consentimiento)
-                if not tipo_mime:
-                    tipo_mime = "application/pdf"
-                tipo_main, tipo_sub = tipo_mime.split("/", 1)
-
-                with open(archivo_consentimiento, "rb") as f:
-                    mensaje.add_attachment(
-                        f.read(),
-                        maintype=tipo_main,
-                        subtype=tipo_sub,
-                        filename=Path(archivo_consentimiento).name,
-                    )
-
-                try:
-                    server.send_message(mensaje)
-                    enviados += 1
-                except Exception as e:
-                    fallidos.append({"numero": i, "email": email_destino, "motivo": str(e)[:200]})
-
-        return {
-            "total": len(datos),
-            "enviados": enviados,
-            "fallidos": fallidos,
-        }
-    
     def _encontrar_email(self, registro: Dict) -> str:
-        """Encuentra el email en el registro"""
+        """Exige un único destinatario inequívoco, sin direcciones inventadas."""
+        candidatos = set()
         for clave, valor in registro.items():
             if 'email' in clave.lower() or 'correo' in clave.lower() or 'mail' in clave.lower():
-                return valor
-        return "email@no-encontrado.com"
+                email = str(valor or "").strip()
+                if not email:
+                    continue
+                if not re.fullmatch(r'[^\s@,;<>]+@[^\s@,;<>]+\.[^\s@,;<>]+', email):
+                    raise ValueError("Borradores bloqueados: hay un email inválido o varios destinatarios en una celda.")
+                candidatos.add(email)
+        if len(candidatos) != 1:
+            raise ValueError("Borradores bloqueados: falta un email único por registro; revisa las columnas de correo.")
+        return candidatos.pop()
     
     def _encontrar_nombre(self, registro: Dict) -> str:
         """Encuentra el nombre completo en el registro"""
@@ -223,41 +260,6 @@ class PreparadorEmails:
         elif apellido:
             return apellido
         return "Estimado/a"
-    
-    def _encontrar_consentimiento(self, registro: Dict, archivos: List[Path]) -> str:
-        """
-        Encuentra el archivo de consentimiento correspondiente a un registro
-        
-        Args:
-            registro: Registro con los datos
-            archivos: Lista de archivos generados
-            
-        Returns:
-            Ruta del archivo o None
-        """
-        # Si no hay archivos, retornar None
-        if not archivos:
-            return None
-        
-        # Si solo hay un archivo, retornarlo (asumiendo que es el único)
-        if len(archivos) == 1:
-            return str(archivos[0])
-        
-        # Buscar por valores de cualquier campo en el nombre del archivo
-        for archivo in archivos:
-            nombre_archivo = archivo.stem.lower()
-            
-            # Buscar cualquier valor del registro en el nombre del archivo
-            for clave, valor in registro.items():
-                if valor and str(valor).lower() in nombre_archivo:
-                    return str(archivo)
-        
-        # Si no encuentra por coincidencia exacta, retornar el primer archivo
-        # (como fallback cuando solo hay uno)
-        if len(archivos) == 1:
-            return str(archivos[0])
-        
-        return None
     
     def _generar_cuerpo_email(self, nombre: str) -> str:
         """
