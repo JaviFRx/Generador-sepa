@@ -27,11 +27,21 @@ En la sección **"📧 Envío de Emails"**:
 3. Mapea los campos (asegúrate que coincidan con Excel)
 4. Click en **"📝 Generar Consentimientos"**
 
-### 5️⃣ Preparar y Enviar Emails
-1. Personaliza el asunto y cuerpo del email (opcional)
-2. Click en **"💌 Preparar Emails"** - genera borradores automáticamente
-3. **Revisa los borradores** en `emails_para_enviar.txt`
-4. Click en **"📧 Enviar Emails por Gmail"** para enviar
+### 5️⃣ Crear borradores y revisarlos en Gmail
+1. Pulsa **Configurar correo** y personaliza el asunto y cuerpo
+2. Revisa destinatarios y adjuntos en `emails_lista.csv`
+3. Con tu cuenta y contraseña de aplicación configuradas, pulsa **Crear borradores (Gmail)**
+4. Abre **Gmail → Borradores** con esa misma cuenta
+5. Comprueba cada destinatario y su PDF en Gmail
+6. Vuelve a la app y pulsa **Enviar borradores revisados (Gmail)**
+7. Revisa la lista y confirma **Enviar los N borradores revisados**
+
+Crear borradores no envía correos: el envío requiere el botón y la confirmación
+posteriores. Si regeneras los PDFs, revisa también los borradores
+antiguos de Gmail: la limpieza de PDFs solo afecta a los archivos locales.
+
+Conserva `historial_borradores.json`: evita repetir los envíos confirmados.
+Si se avisa de un envío sin confirmar, comprueba **Enviados** en Gmail antes de reintentar.
 
 ---
 

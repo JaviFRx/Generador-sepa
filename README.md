@@ -94,8 +94,10 @@ python app_consentimientos.py
 2. **Configura mapeo** → Asigna columnas del Excel a campos de la plantilla
 3. **Selecciona plantilla Word** → Documento con los marcadores `{{campo}}`
 4. **Genera PDFs** → Crea archivos PDF individuales con campos editables
-5. **Prepara Emails** → Configura asunto y cuerpo, genera borradores
-6. **Envía por Gmail** → Envía automáticamente a través de tu cuenta
+5. **Configurar correo** → Configura asunto y cuerpo y revisa la lista de adjuntos
+6. **Crear borradores (Gmail)** → Guarda los correos con sus PDFs en Borradores
+7. **Revisa en Gmail** → Abre cada borrador y comprueba destinatario y PDF
+8. **Enviar borradores revisados** → Vuelve a la app, comprueba la lista y confirma el envío
 
 ### 2. Preparar tu plantilla Word
 
@@ -117,9 +119,9 @@ En {{localidad_firma}}, a {{fecha}}
 Firma del deudor: {{firma}}
 ```
 
-### 3. Configurar cuenta Gmail para envío
+### 3. Configurar cuenta Gmail para borradores
 
-Para enviar emails directamente desde la app:
+Para guardar borradores en Gmail desde la app:
 
 1. **Activa verificación en 2 pasos** en tu cuenta Google
 2. **Ve a** https://myaccount.google.com/apppasswords
@@ -381,20 +383,86 @@ Al ejecutar el programa, se crearán:
 - **Clave única por usuario**: La encriptación usa el usuario de Windows como clave
 - **No se envía a internet**: Los datos de configuración nunca se sincronizar en la nube
 
-## 📧 Envío de Emails
+## 📧 Borradores en Gmail
 
-### Flujo de envío
+### Flujo de revisión y envío manual
 
-1. **Preparar Emails**:
+**El envío se hace después de revisar los borradores en Gmail.** Primero pulsa
+**Crear borradores (Gmail)**. Cada mensaje queda en Borradores con su destinatario,
+asunto, cuerpo y PDF adjunto. Después de revisarlos, vuelve a la app y pulsa
+**Enviar borradores revisados (Gmail)**. Verás la lista de destinatarios, asuntos
+y PDFs antes de confirmar. La cuenta y contraseña de aplicación se reutilizan
+para leer los borradores por IMAP y enviarlos por SMTP.
+
+**Corrección de asociación de adjuntos (20/09/2026):** tras actualizar, vuelve a
+generar todos los consentimientos y revisa `emails_lista.csv` antes de enviar.
+Los PDFs antiguos no se pueden enviar con esta versión porque no tienen una
+asociación verificable con el Excel.
+
+Cada generación guarda `registro_consentimientos.json` junto a los PDFs, con la
+asociación de cada registro y la huella del contenido de su archivo. Conserva este
+archivo en la misma carpeta. Si cambia el Excel, falta un PDF, se modifica un
+adjunto, se repite un PDF o la generación queda incompleta, se bloquea todo el
+proceso de creación de borradores antes de conectar con Gmail. Cada fila debe contener un único destinatario
+inequívoco en sus columnas de correo.
+
+Al iniciar una generación con un Excel válido y con registros, se borran los PDFs
+y los borradores de email anteriores de la carpeta de salida. Los demás archivos
+y las subcarpetas se conservan. Si un archivo está abierto y no se puede borrar,
+la generación se detiene y los borradores quedan bloqueados hasta generar un lote completo.
+Revisa los adjuntos indicados en el CSV del nuevo lote antes de enviar.
+
+Al generar los PDFs aparece una ventana modal con los documentos procesados,
+pendientes y fallidos. La conversión se ejecuta en segundo plano para que la
+interfaz siga respondiendo. El reloj se actualiza durante la conversión y la
+estimación se ajusta al terminar cada PDF. La modal se cierra al finalizar.
+
+1. **Configurar correo**:
    - Configura asunto y cuerpo del email
-   - Personaliza con variables como `{nombre}`, `{apellido}`, etc.
-   - Se generan archivos de borrador automáticamente
+   - Personaliza el texto con `{nombre}`
+   - Se generan `emails_lista.csv` y `emails_para_enviar.txt` para revisar la asociación
 
-2. **Enviar Emails (Gmail)**:
+2. **Crear borradores (Gmail)**:
    - Requiere credenciales de Gmail
-   - Usa Gmail SMTP (smtp.gmail.com:465)
-   - Adjunta automáticamente los PDFs generados
-   - Muestra resumen de enviados y fallidos
+   - Guarda cada mensaje en Borradores mediante IMAP, con su PDF verificado
+   - Detecta la carpeta de borradores aunque Gmail esté en otro idioma
+   - Si encuentra el mismo identificador de mensaje en Borradores, lo omite
+   - Muestra creados, ya existentes, pendientes y mensajes sin confirmación
+
+3. **Revisar en Gmail y enviar desde la app**:
+   - Abre Gmail con la misma cuenta y entra en **Borradores**
+   - Comprueba el destinatario y abre el PDF
+   - Vuelve a la app y pulsa **Enviar borradores revisados (Gmail)**
+   - Comprueba la lista y confirma con **Enviar los N borradores revisados**
+   - Los borradores guardados en Gmail se gestionan allí: regenerar los PDFs solo
+     limpia los archivos locales. Elimina en Gmail los borradores de lotes antiguos
+     que ya no quieras usar
+
+Si se interrumpe la conexión, revisa Gmail antes de reintentar. Un borrador puede
+haberse guardado aunque no se haya recibido su confirmación. La aplicación no
+reintenta automáticamente. La detección de duplicados se aplica mientras el
+mensaje conserve su identificador y siga en Borradores.
+
+Referencia técnica: [carpetas especiales de Gmail mediante IMAP](https://developers.google.com/workspace/gmail/imap/imap-extensions).
+
+El botón de envío descarga el contenido actual de los borradores; no reconstruye
+el correo desde el Excel. Conserva los cambios de asunto y texto hechos en Gmail.
+El destinatario y el PDF deben seguir coincidiendo con el lote generado: cambios,
+adjuntos adicionales, CC/CCO, duplicados o borradores ausentes bloquean la operación.
+Los borradores ajenos al lote se dejan intactos.
+
+Tras confirmar, se comprueba otra vez que los mensajes no hayan cambiado. Cada
+envío se registra en `historial_borradores.json`, que debes conservar. Los envíos
+confirmados no se repiten y sus borradores se retiran individualmente de Gmail.
+Si se pierde la confirmación de un envío, el lote queda bloqueado para evitar
+duplicados: comprueba **Enviados** en Gmail antes de resolver el estado pendiente.
+Si el envío se confirmó pero no se pudo retirar el borrador, se avisa y se detiene
+el lote; ese correo no se vuelve a enviar desde la app.
+
+Los borradores creados con la versión anterior se reconocen por su identificador
+si aún lo conservan y usas los mismos ajustes de asunto y texto. Si Gmail ha
+cambiado ese identificador y no existe historial local, se bloquea la asociación
+en lugar de adivinar a qué lote pertenecen.
 
 ### Generador de contraseña de aplicación
 
@@ -480,7 +548,7 @@ pip install -r requirements.txt
 ## 📝 Notas Importantes
 
 - Los nombres de columnas en Excel no distinguen mayúsculas/minúsculas
-- Los consentimientos se sobrescriben si ya existe un archivo con el mismo nombre
+- Al generar un nuevo lote se borran los PDFs anteriores de la carpeta de salida
 - **Se recomienda revisar los borradores en `emails_para_enviar.txt` antes de enviar emails**
 - Los archivos generados usan formato .docx (Word 2007+)
 - Las contraseñas se guardan **encriptadas** en `~/.sepas_config.json` (tu perfil de Windows)
