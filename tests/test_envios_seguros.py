@@ -65,7 +65,7 @@ class EnviosSegurosTest(unittest.TestCase):
         )
 
     def comprobar_bloqueo(self):
-        with self.assertRaisesRegex(ValueError, "Borradores bloqueados"):
+        with self.assertRaisesRegex(ValueError, "Borradores bloqueados|Envío bloqueado"):
             self.crear_gmail()
         self.imap.assert_not_called()
 
@@ -171,6 +171,83 @@ class EnviosSegurosTest(unittest.TestCase):
         self.guardar_excel()
         self.generar_lote()
         self.comprobar_bloqueo()
+
+    def test_error_indica_fila_real_tras_filas_vacias_y_persona(self):
+        self.datos[1]['email'] = ''
+        self.guardar_excel()
+        libro = Workbook()
+        libro.active.title = 'Familias'
+        libro.active.append(list(self.datos[0]))
+        libro.active.append(list(self.datos[0].values()))
+        libro.active.append([None, None, None])
+        libro.active.append(list(self.datos[1].values()))
+        libro.active.append(list(self.datos[2].values()))
+        libro.save(self.excel)
+        libro.close()
+        self.generar_lote()
+        for preparar in (lambda: self.preparador.crear_borradores_email(str(self.excel)), self.crear_gmail):
+            with self.assertRaises(ValueError) as error:
+                preparar()
+            texto = str(error.exception)
+            self.assertIn('Familias', texto)
+            self.assertIn('Fila 4 (Anabel)', texto)
+            self.assertIn('vacías', texto)
+            self.assertIn('«email»', texto)
+            self.assertIn('vuelve a generar los PDFs', texto)
+        informe = (self.carpeta / 'errores_correos.txt').read_text(encoding='utf-8')
+        self.assertIn('Fila 4 (Anabel)', informe)
+        self.imap.assert_not_called()
+
+    def test_error_muestra_todas_las_filas_invalidas_y_distingue_motivos(self):
+        self.datos[0]['email'] = ''
+        self.datos[1]['email'] = 'sin-arroba'
+        self.datos[2]['email'] = 'ana@example.test;luis@example.test'
+        self.guardar_excel()
+        self.generar_lote()
+        with self.assertRaises(ValueError) as error:
+            self.crear_gmail()
+        texto = str(error.exception)
+        self.assertIn('3 fila(s)', texto)
+        for fila in (2, 3, 4):
+            self.assertIn(f'Fila {fila}', texto)
+        self.assertIn('vacías', texto)
+        self.assertIn('sin-arroba', texto)
+        self.assertIn('varias direcciones', texto)
+        self.imap.assert_not_called()
+
+    def test_error_ambiguo_identifica_ambas_columnas_y_direcciones(self):
+        with self.assertRaises(ValueError) as error:
+            self.preparador._encontrar_email({'Email': 'ana@example.test', 'Correo alternativo': 'luis@example.test'})
+        for valor in ('varios correos distintos', 'Email', 'Correo alternativo', 'ana@example.test', 'luis@example.test'):
+            self.assertIn(valor, str(error.exception))
+
+    def test_sin_columna_reconocida_explicita_encabezado_necesario(self):
+        with self.assertRaisesRegex(ValueError, 'ninguna columna de correo'):
+            self.preparador._encontrar_email({'Contacto': 'ana@example.test', 12: 'dato'})
+
+    def test_no_bloquea_dos_columnas_con_el_mismo_correo(self):
+        self.assertEqual(self.preparador._encontrar_email({'email': 'ana@example.test', 'correo': 'ana@example.test'}),
+                         'ana@example.test')
+
+    def test_reconoce_correu_catalan_del_excel_y_verifica_su_adjunto(self):
+        for registro in self.datos:
+            registro['Direcció correu electrònic (minúscula)'] = registro.pop('email')
+        self.guardar_excel()
+        self.registro.iniciar(self.datos)
+        for i, registro in enumerate(self.datos, 1):
+            pdf = self.carpeta / f'catalan_{i}.pdf'
+            pdf.write_bytes(b'%PDF-1.7\n' + str(i).encode())
+            self.registro.agregar(i, registro, pdf)
+        self.registro.finalizar()
+        mensajes = self.preparador._preparar_mensajes(str(self.excel), 'remitente@example.test')
+        for i, (mensaje, registro) in enumerate(zip(mensajes, self.datos), 1):
+            self.assertEqual(str(mensaje['To']), registro['Direcció correu electrònic (minúscula)'])
+            self.assertEqual(next(mensaje.iter_attachments()).get_payload(decode=True), b'%PDF-1.7\n' + str(i).encode())
+        self.imap.assert_not_called()
+
+    def test_correu_y_correo_distintos_se_bloquean(self):
+        with self.assertRaisesRegex(ValueError, 'varios correos distintos'):
+            self.preparador._encontrar_email({'Correu electrònic': 'ana@example.test', 'Correo': 'luis@example.test'})
 
     def test_borrador_conserva_los_bytes_validados_aunque_el_archivo_cambie(self):
         self.generar_lote()
@@ -295,6 +372,7 @@ class EnviosSegurosTest(unittest.TestCase):
         app.agregar_log = Mock()
         app.root = Mock()
         app.btn_generar = Mock()
+        app.btn_enviar = Mock()
         app.barra_progreso = Mock()
         app.progreso_estado = Mock()
         app.progreso_detalle = Mock()

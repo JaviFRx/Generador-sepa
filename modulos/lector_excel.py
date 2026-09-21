@@ -21,6 +21,8 @@ class LectorExcel:
         self.ruta_archivo = Path(ruta_archivo)
         self.workbook = None
         self.sheet = None
+        self.filas_excel = []
+        self.nombre_hoja = None
         
     def leer_datos(self) -> List[Dict]:
         """
@@ -37,6 +39,8 @@ class LectorExcel:
             # Abrir el archivo Excel
             self.workbook = openpyxl.load_workbook(self.ruta_archivo)
             self.sheet = self.workbook.active
+            self.filas_excel = []
+            self.nombre_hoja = self.sheet.title
             
             # Leer encabezados (primera fila)
             encabezados = []
@@ -59,6 +63,7 @@ class LectorExcel:
                 # Solo agregar si hay al menos un dato
                 if any(registro.values()):
                     datos.append(registro)
+                    self.filas_excel.append(row_idx)
             
             self.workbook.close()
             return datos

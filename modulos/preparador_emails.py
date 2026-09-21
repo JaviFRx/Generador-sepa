@@ -47,7 +47,7 @@ class PreparadorEmails:
         datos = lector.leer_datos()
         
         archivos_generados = RegistroConsentimientos(self.carpeta_consentimientos).validar(datos)
-        emails = [self._encontrar_email(registro) for registro in datos]
+        emails = self._validar_emails(datos, lector.filas_excel, lector.nombre_hoja)
         
         # Crear borradores
         borradores = []
@@ -198,9 +198,10 @@ class PreparadorEmails:
         # Validar y cargar todos los adjuntos antes de conectar con Gmail.
         # El borrador conserva los mismos bytes verificados.
         archivos_generados = RegistroConsentimientos(self.carpeta_consentimientos).validar(datos)
+        emails = self._validar_emails(datos, lector.filas_excel, lector.nombre_hoja)
         mensajes = []
         for i, registro in enumerate(datos, 1):
-            email_destino = self._encontrar_email(registro)
+            email_destino = emails[i - 1]
             nombre = self._encontrar_nombre(registro)
             adjunto = archivos_generados[i - 1]
             cuerpo = (cuerpo_personalizado.replace("{nombre}", nombre)
@@ -226,19 +227,55 @@ class PreparadorEmails:
 
         return mensajes
 
+    def _validar_emails(self, datos, filas_excel, nombre_hoja):
+        emails = []
+        errores = []
+        for registro, fila_excel in zip(datos, filas_excel):
+            try:
+                emails.append(self._encontrar_email(registro))
+            except ValueError as exc:
+                nombre = self._encontrar_nombre(registro)
+                persona = f" ({nombre})" if nombre != "Estimado/a" else ""
+                errores.append(f"Fila {fila_excel}{persona}: {exc}")
+        if errores:
+            cabecera = f"Envío bloqueado: {len(errores)} fila(s) con problemas de correo en la hoja «{nombre_hoja}»."
+            instrucciones = "Corrige esas filas del Excel y vuelve a generar los PDFs antes de enviar. No se ha enviado ningún correo."
+            detalle = "\n\n".join(errores)
+            ruta = self.carpeta_consentimientos / "errores_correos.txt"
+            guardado = False
+            try:
+                ruta.write_text(cabecera + "\n\n" + detalle + "\n\n" + instrucciones, encoding="utf-8")
+                guardado = True
+            except OSError:
+                pass
+            resumen = "\n\n".join(errores[:8]) if guardado else detalle
+            if guardado and len(errores) > 8:
+                resumen += f"\n\n… y {len(errores) - 8} fila(s) más."
+            if guardado:
+                resumen += f"\n\nDetalle completo: {ruta}"
+            raise ValueError(cabecera + "\n\n" + resumen + "\n\n" + instrucciones)
+        return emails
+
     def _encontrar_email(self, registro: Dict) -> str:
         """Exige un único destinatario inequívoco, sin direcciones inventadas."""
         candidatos = set()
-        for clave, valor in registro.items():
-            if 'email' in clave.lower() or 'correo' in clave.lower() or 'mail' in clave.lower():
-                email = str(valor or "").strip()
-                if not email:
-                    continue
-                if not re.fullmatch(r'[^\s@,;<>]+@[^\s@,;<>]+\.[^\s@,;<>]+', email):
-                    raise ValueError("Borradores bloqueados: hay un email inválido o varios destinatarios en una celda.")
-                candidatos.add(email)
+        columnas = [(str(clave), str(valor or "").strip()) for clave, valor in registro.items()
+                    if any(palabra in str(clave).lower() for palabra in ('mail', 'correo', 'correu'))]
+        if not columnas:
+            raise ValueError("No se reconoce ninguna columna de correo. Usa un encabezado como «Email», «Correo electrónico» o «Correu electrònic».")
+        for clave, email in columnas:
+            if not email:
+                continue
+            if not re.fullmatch(r'[^\s@,;<>]+@[^\s@,;<>]+\.[^\s@,;<>]+', email):
+                valor = json.dumps(email[:160], ensure_ascii=False)
+                raise ValueError(f"La columna «{clave}» contiene un correo inválido o varias direcciones: {valor}. Debe contener una sola dirección válida.")
+            candidatos.add(email)
+        if not candidatos:
+            nombres = ", ".join(f"«{clave}»" for clave, _ in columnas)
+            raise ValueError(f"Falta el destinatario: las columnas de correo están vacías ({nombres}).")
         if len(candidatos) != 1:
-            raise ValueError("Borradores bloqueados: falta un email único por registro; revisa las columnas de correo.")
+            valores = "; ".join(f"«{clave}»: {email}" for clave, email in columnas if email)
+            raise ValueError(f"Hay varios correos distintos: {valores}. Deja un único destinatario en las columnas de correo de esa fila.")
         return candidatos.pop()
     
     def _encontrar_nombre(self, registro: Dict) -> str:
@@ -247,7 +284,7 @@ class PreparadorEmails:
         apellido = ""
         
         for clave, valor in registro.items():
-            clave_lower = clave.lower()
+            clave_lower = str(clave).lower()
             if 'nombre' in clave_lower and 'apellido' not in clave_lower:
                 nombre = valor
             elif 'apellido' in clave_lower:
